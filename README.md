@@ -74,22 +74,28 @@ is fully functional; the llama server just parks in `:no_model`.
 
 ## Run it
 
-The server (sidecars + the WebSocket endpoint on `:4000`, override with
-`MANIFOLD_WEB_PORT`):
+Build the UI once, then boot the app — one OS process serves the interface and
+the protocol, on `:4000` (override with `MANIFOLD_WEB_PORT`):
 
 ```sh
+cd ui && mise exec -- npm install && mise exec -- npm run build && cd ..
 mise exec -- iex -S mix
 ```
 
-The UI, in a second shell — Vite dev server on `:5173`, connecting to
-`ws://127.0.0.1:4000/socket`:
+Open <http://127.0.0.1:4000>. `npm run build` writes the bundle to `priv/static`,
+which `Manifold.Web.Router` serves; the same port answers `ws://…/socket`, so
+there is no CORS and nothing to configure. Without that build the app still runs
+fine — `/` just replies `503` telling you which command to run.
+
+For frontend work you want Vite's dev server instead, on `:5173`, talking to the
+same backend:
 
 ```sh
-cd ui && mise exec -- npm install && mise exec -- npm run dev
+cd ui && mise exec -- npm run dev
 ```
 
-The UI also runs without a backend at all: `http://localhost:5173/?mock=1` drives
-it from a scripted fake event feed. See `ui/README.md`.
+And the UI runs with no backend at all: `http://localhost:5173/?mock=1` drives it
+from a scripted fake event feed. See `ui/README.md`.
 
 ## Run the smoke tests
 
@@ -201,6 +207,3 @@ Not yet built:
   scripts above, which need a live `swipl` and (for the LLM phases) a model. The
   pure parts — `Clause`, `Prolog.MQI` framing, `Prolog.Answer`, `Event` — are
   unit-testable without either sidecar.
-- **Serving the built UI from the app.** `Manifold.Web.Router` exposes only
-  `/socket` and `/health`; `ui/dist` is reachable through `npm run preview`, not
-  through Bandit.

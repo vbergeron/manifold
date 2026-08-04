@@ -24,9 +24,12 @@ defmodule Manifold.MixProject do
     [
       {:req, "~> 0.5"},
       {:jason, "~> 1.4"},
-      # The web half: Bandit serves the UI socket, websock_adapter does the upgrade.
+      # The web half: Bandit serves the UI socket, websock_adapter does the
+      # upgrade. Plug arrives through Bandit anyway, but `Manifold.Web.Router`
+      # uses `Plug.Router` and `Plug.Static` directly, so it is named directly.
       {:bandit, "~> 1.0"},
-      {:websock_adapter, "~> 0.5"}
+      {:websock_adapter, "~> 0.5"},
+      {:plug, "~> 1.20"}
     ]
   end
 end

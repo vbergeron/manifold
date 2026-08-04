@@ -10,5 +10,7 @@ manifold-*.tar
 # GGUF models are large; keep them out of git.
 /models/*.gguf
 /models/*.bin
+# Build output of the UI (`ui/npm run build`), served from here at runtime.
+/priv/static/
 # Transient scratch dir from the Claude Code harness.
 /.claude/.cc-writes/

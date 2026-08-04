@@ -15,12 +15,20 @@ mise exec -- npm install
 mise exec -- npm run dev         # http://localhost:5173
 ```
 
-Other scripts: `npm run typecheck`, `npm run build` (typechecks, then bundles to
-`dist/`), `npm run preview`.
+Other scripts: `npm run typecheck`, `npm run build`, `npm run preview`.
+
+`npm run build` typechecks, then bundles to **`../priv/static`** — the Elixir
+app's `priv/`, from where `Manifold.Web.Router` serves it. So a production run is
+`npm run build` once and then just the Elixir app: the interface and the socket
+come off the same port, `:4000`. The dev server below exists for hot reload.
 
 ### Connection
 
-Connects to **`ws://127.0.0.1:4000/socket`**. Override with `VITE_WS_URL` (see
+In a production build the socket is **same-origin** — `wss?://<this page's
+host>/socket` — because the Elixir app serves the page itself, so it works
+unchanged over the network or behind TLS. In dev, where the page comes from Vite
+on `:5173` and the server is on `:4000`, it defaults to
+**`ws://127.0.0.1:4000/socket`**. Override either with `VITE_WS_URL` (see
 `.env.example`):
 
 ```sh
