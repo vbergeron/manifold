@@ -14,11 +14,29 @@ defmodule Manifold.Gate do
   the loop only reads the two booleans.
   """
 
-  # Interrogatives that open a question even without a '?' ("is he mortal", "who
-  # is human"). Auxiliaries are included because inversion is the other marker.
-  @interrogative ~w(who what which where when why how whose whom
-                    is are was were am do does did can could will would
-                    should has have had may might must tell list show)
+  # Three lists, because *where* a word sits decides whether it asks anything.
+  #
+  # Wh-words ask wherever they appear: "find out **which** pet each person owns"
+  # commissions an answer as surely as "which pet?" does. Matching these anywhere
+  # is deliberately liberal, on the asymmetry in the moduledoc — a false
+  # `needs_query` costs one goal that answers `false`, while a *missed* question
+  # costs the entire point of the turn, since the KB is then never consulted.
+  @wh ~w(who what which where when why whose whom how)
+
+  # Auxiliaries only ask when they open the sentence, because inversion is the
+  # marker: "is he mortal" asks, "he is mortal" states. Same word, and position is
+  # the only thing separating a question from a fact — so these must never be
+  # matched mid-sentence, or every declarative would classify as a question.
+  @inverted ~w(is are was were am do does did can could will would
+               should has have had may might must)
+
+  # Imperatives that commission an answer without being interrogative at all:
+  # "Use the clues below to work out who owns what", "solve this", "list the
+  # mortals". A puzzle is nearly always phrased this way, never as a question.
+  @imperative ~w(tell list show give find solve determine identify deduce
+                 figure work compute calculate use)
+
+  @sentence_initial @inverted ++ @imperative
 
   @chitchat ~w(hi hello hey yo sup hiya greetings morning evening
                thanks thank thx cheers ok okay k cool nice great
@@ -66,7 +84,11 @@ defmodule Manifold.Gate do
   end
 
   defp question?(sentence) do
-    String.ends_with?(sentence, "?") or first_word(sentence) in @interrogative
+    words = words(sentence)
+
+    String.ends_with?(sentence, "?") or
+      List.first(words) in @sentence_initial or
+      Enum.any?(words, &(&1 in @wh))
   end
 
   # A statement carries facts unless it is pure social noise ("hi", "thanks!").
@@ -74,8 +96,6 @@ defmodule Manifold.Gate do
     words = words(sentence)
     words != [] and not Enum.all?(words, &(&1 in @chitchat))
   end
-
-  defp first_word(sentence), do: sentence |> words() |> List.first()
 
   defp words(sentence) do
     sentence

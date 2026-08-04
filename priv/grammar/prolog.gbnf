@@ -1,7 +1,9 @@
 # GBNF grammar for a useful subset of Prolog.
 # Constrains llama.cpp decoding so the model can only emit syntactically valid
 # clauses: balanced parens, terminating '.', lowercase functors, uppercase vars.
-# Grow as needed (lists, operators, strings); this subset already proves the loop.
+# Grow as needed (operators, strings); this subset already proves the loop.
+# Note what is still absent: there are no operators, so `X \= Y` and `all_different/1`
+# cannot be generated — generate-and-test puzzle solving needs those as well as lists.
 
 root        ::= clause+
 clause      ::= (rule | constraint | fact) "." ws
@@ -14,7 +16,12 @@ negation    ::= "\\+" ws term
 term        ::= compound | atom
 compound    ::= atom "(" ws args ws ")"
 args        ::= arg (ws "," ws arg)*
-arg         ::= variable | number | term
+arg         ::= variable | number | list | term
+# Lists are arguments, never goals or clause heads: `member(X, [bird, fish])` is
+# meaningful, a bare `[a, b].` is not. The tail form `[H|T]` takes a variable
+# only — `[a|[b]]` is legal Prolog but nothing here needs to generate it.
+list        ::= "[" ws (listitems ws)? "]"
+listitems   ::= arg (ws "," ws arg)* (ws "|" ws variable)?
 atom        ::= [a-z] [a-zA-Z0-9_]*
 variable    ::= [A-Z_] [a-zA-Z0-9_]*
 number      ::= "-"? [0-9]+ ("." [0-9]+)?

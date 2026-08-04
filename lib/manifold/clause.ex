@@ -71,6 +71,49 @@ defmodule Manifold.Clause do
   end
 
   @doc """
+  The distinct variables a clause mentions, in order of first appearance.
+
+  `_` counts: it is an anonymous variable, not a wildcard that means "unknown".
+  The lookbehind is what keeps `has_beak` and `pet1` from reading as variables —
+  only an upper-case letter or underscore *starting* a token is one.
+  """
+  @spec variables(String.t()) :: [String.t()]
+  def variables(text) do
+    ~r/(?<![a-zA-Z0-9_])[A-Z_][a-zA-Z0-9_]*/
+    |> Regex.scan(text)
+    |> Enum.map(fn [v] -> v end)
+    |> Enum.uniq()
+  end
+
+  @doc """
+  Why `text` must not be asserted, or `nil` if it is safe.
+
+  The GBNF grammar guarantees *syntax*, not sense, and there is one unsound shape
+  it cannot exclude: a **fact carrying a variable**. `pet(jane, _).` does not say
+  "Jane has some pet" — it makes `pet(jane, X)` succeed for *every* `X`, so a
+  single such clause renders every later query about that predicate meaningless
+  while still looking like a normal fact in the KB.
+
+  Extraction produces these whenever the model refers to something it cannot name
+  ("Kelly's pet"), which is exactly when it is least able to notice the damage.
+  So they are refused here instead of asserted.
+
+  Rules and constraints are variable-bearing by nature (`mortal(X) :- human(X).`,
+  `:- whale(A), fish(A).`) — there the variable is bound by the body, which is the
+  whole point, and they are never rejected.
+  """
+  @spec rejection(String.t()) :: String.t() | nil
+  def rejection(text) do
+    case {kind(text), variables(text)} do
+      {:fact, [_ | _] = vars} ->
+        "a fact may not contain variables (#{Enum.join(vars, ", ")}): it would hold for every term"
+
+      _ ->
+        nil
+    end
+  end
+
+  @doc """
   The `"name/arity"` signatures a clause mentions: the head for facts and rules,
   every top-level body goal for a constraint (which has no head).
   """
@@ -101,7 +144,9 @@ defmodule Manifold.Clause do
   # Contents of the outermost parentheses of "(A, f(B, C))".
   defp inner(args), do: args |> String.trim() |> binary_slice(1..-2//1)
 
-  # Split on commas that are not nested inside parentheses.
+  # Split on commas nested inside neither parentheses nor brackets. Brackets have
+  # to count too, or the comma in `member(X, [a, b])` splits an argument in half
+  # and the goal reads as `member/3`.
   defp split_top_level(nil), do: []
 
   defp split_top_level(text) do
@@ -109,8 +154,8 @@ defmodule Manifold.Clause do
       text
       |> String.graphemes()
       |> Enum.reduce({[], "", 0}, fn
-        "(", {parts, cur, d} -> {parts, cur <> "(", d + 1}
-        ")", {parts, cur, d} -> {parts, cur <> ")", d - 1}
+        ch, {parts, cur, d} when ch in ["(", "["] -> {parts, cur <> ch, d + 1}
+        ch, {parts, cur, d} when ch in [")", "]"] -> {parts, cur <> ch, d - 1}
         ",", {parts, cur, 0} -> {[cur | parts], "", 0}
         ch, {parts, cur, d} -> {parts, cur <> ch, d}
       end)
@@ -118,15 +163,18 @@ defmodule Manifold.Clause do
     [last | parts] |> Enum.reverse() |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
   end
 
+  # A stack rather than a counter, because the two bracket kinds must also *match*:
+  # `foo([a, b).` balances by count and would otherwise survive as valid.
   defp balanced?(text) do
     text
     |> String.graphemes()
-    |> Enum.reduce_while(0, fn
-      "(", d -> {:cont, d + 1}
-      ")", 0 -> {:halt, :unbalanced}
-      ")", d -> {:cont, d - 1}
-      _, d -> {:cont, d}
+    |> Enum.reduce_while([], fn
+      "(", stack -> {:cont, [")" | stack]}
+      "[", stack -> {:cont, ["]" | stack]}
+      ch, [ch | rest] when ch in [")", "]"] -> {:cont, rest}
+      ch, _stack when ch in [")", "]"] -> {:halt, :unbalanced}
+      _, stack -> {:cont, stack}
     end)
-    |> Kernel.==(0)
+    |> Kernel.==([])
   end
 end

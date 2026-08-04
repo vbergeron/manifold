@@ -302,12 +302,22 @@ defmodule Manifold.Conversation do
   defp insert_clauses(s, clauses) do
     {added, flagged} =
       Enum.reduce(clauses, {[], []}, fn clause, {added, flagged} ->
-        # A successful assertz answers `true` or leaks the clause's (unbound)
-        # variable bindings — both mean success.
-        case MQI.run(s.conn, "assertz((#{Clause.body(clause.text)}))") do
-          {:ok, false} -> {added, [%{id: clause.id, reason: "assert failed"} | flagged]}
-          {:ok, _} -> {[clause | added], flagged}
-          {:error, reason} -> {added, [%{id: clause.id, reason: to_string(reason)} | flagged]}
+        case Clause.rejection(clause.text) do
+          # Refused before it reaches Prolog. Reporting it as `flagged` rather than
+          # dropping it silently is deliberate: the UI shows the clause with its
+          # reason, which is far more useful than a KB that has quietly started
+          # answering every question about that predicate `true`.
+          reason when is_binary(reason) ->
+            {added, [%{id: clause.id, reason: reason} | flagged]}
+
+          nil ->
+            # A successful assertz answers `true` or leaks the clause's (unbound)
+            # variable bindings — both mean success.
+            case MQI.run(s.conn, "assertz((#{Clause.body(clause.text)}))") do
+              {:ok, false} -> {added, [%{id: clause.id, reason: "assert failed"} | flagged]}
+              {:ok, _} -> {[clause | added], flagged}
+              {:error, reason} -> {added, [%{id: clause.id, reason: to_string(reason)} | flagged]}
+            end
         end
       end)
 
