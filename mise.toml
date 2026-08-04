@@ -1,0 +1,22 @@
+[tools]
+erlang = "27"
+# Pin the OTP-27 build of Elixir so it matches the erlang above (the plain
+# "1.18" default resolves to an otp-28 build that won't load on OTP 27).
+elixir = "1.18.4-otp-27"
+"llama.cpp" = "latest"
+# NOTE: swiprolog is intentionally NOT managed by mise. The asdf plugin builds
+# SWI-Prolog from source and needs system dev libs (libdl, tcmalloc, ...) that
+# aren't present. The system package (swipl 9.2.8) is identical and used instead.
+# To bring it under mise later: install the build deps, then add
+#   swiprolog = "9.2.9"
+
+[env]
+# Where the GGUF model lives; override locally. Loaded by the llama.cpp server.
+MANIFOLD_MODEL = "{{config_root}}/models/model.gguf"
+# Ports for the two supervised sidecar servers.
+MANIFOLD_LLAMA_PORT = "8080"
+MANIFOLD_PROLOG_PORT = "8090"
+
+[settings]
+# asdf-style plugins (swiprolog) need this.
+idiomatic_version_file_enable_tools = ["elixir", "erlang"]

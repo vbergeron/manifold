@@ -1,0 +1,14 @@
+/_build/
+/deps/
+/cover/
+/doc/
+/.fetch
+erl_crash.dump
+*.ez
+manifold-*.tar
+/.elixir_ls/
+# GGUF models are large; keep them out of git.
+/models/*.gguf
+/models/*.bin
+# Transient scratch dir from the Claude Code harness.
+/.claude/.cc-writes/
