@@ -62,12 +62,19 @@ defmodule Manifold.Turn do
     added = if gate.new_facts, do: extract(conv, turn, gate.statements, subscriber), else: []
     violations = if added != [], do: check(conv, turn, added, subscriber), else: []
 
-    answers =
+    {answers, unanswered} =
       if gate.needs_query and violations == [],
         do: query(conv, turn, gate.questions, subscriber),
-        else: []
+        else: {[], []}
 
-    respond(conv, turn, text, added, violations, answers, subscriber)
+    evidence = %{
+      clauses: Enum.map(added, & &1.text),
+      violations: violations,
+      answers: answers,
+      unanswered: unanswered
+    }
+
+    respond(conv, turn, text, evidence, subscriber)
     Event.emit(subscriber, :turn_done, turn, %{})
     :ok
   end
@@ -139,7 +146,7 @@ defmodule Manifold.Turn do
     # evidence block tells `respond` to simply converse.
     if known == [] do
       Logger.debug("[turn] #{turn}: query skipped, knowledge base has no predicates")
-      []
+      {[], [%{goal: nil, missing: []}]}
     else
       case generate(Prompt.goals(text, known), @goals_opts, turn, subscriber) do
         {:ok, output} ->
@@ -147,10 +154,15 @@ defmodule Manifold.Turn do
           |> Clause.split()
           |> Enum.reject(&(Clause.kind(&1) == :constraint))
           |> Enum.take(@max_goals)
-          |> Enum.flat_map(&run_goal(conv, turn, &1, known, subscriber))
+          |> Enum.map(&run_goal(conv, turn, &1, known, subscriber))
+          |> Enum.reduce({[], []}, fn
+            {:answer, fields}, {answers, unanswered} -> {answers ++ [fields], unanswered}
+            {:unanswered, info}, {answers, unanswered} -> {answers, unanswered ++ [info]}
+            :none, acc -> acc
+          end)
 
         {:error, _reason} ->
-          []
+          {[], []}
       end
     end
   end
@@ -168,40 +180,34 @@ defmodule Manifold.Turn do
       # under the closed-world assumption.
       [_ | _] = unknown ->
         Logger.debug("[turn] #{turn}: dropped #{goal}, KB has no #{Enum.join(unknown, ", ")}")
-        []
+        {:unanswered, %{goal: goal, missing: unknown}}
 
       [] ->
         case Conversation.query(conv, goal, @query_timeout_s) do
           {:ok, result} ->
             fields = %{goal: goal, answer: Answer.encode(result)}
             Event.emit(subscriber, :message, turn, Conversation.add_message(conv, turn, :query, fields))
-            [fields]
+            {:answer, fields}
 
           {:error, "time_limit_exceeded"} ->
             Event.error(subscriber, turn, "prolog_timeout", "#{goal} exceeded #{@query_timeout_s}s")
-            []
+            :none
 
           {:error, reason} ->
             Event.error(subscriber, turn, "internal", "prolog error on #{goal}: #{inspect(reason)}")
-            []
+            :none
         end
     end
   end
 
   # The one ungrammared step: prose, streamed token by token into a transcript
   # message that already has its id, so the UI can render the bubble immediately.
-  defp respond(conv, turn, text, added, violations, answers, subscriber) do
+  defp respond(conv, turn, text, evidence, subscriber) do
     Event.emit(subscriber, :turn_phase, turn, %{phase: "respond"})
     %{id: id} = Conversation.begin_assistant(conv, turn)
 
     prompt =
-      Prompt.respond(%{
-        message: text,
-        history: history(conv, id),
-        clauses: Enum.map(added, & &1.text),
-        violations: violations,
-        answers: answers
-      })
+      Prompt.respond(Map.merge(evidence, %{message: text, history: history(conv, id)}))
 
     emit = fn delta ->
       Conversation.append_assistant(conv, id, delta)
@@ -217,7 +223,7 @@ defmodule Manifold.Turn do
           # No model, or it died mid-stream. Say so, but still close the bubble
           # with the evidence we do have — the Prolog half works without an LLM.
           Event.error(subscriber, turn, "llama_unavailable", inspect(reason))
-          fallback = fallback(added, violations, answers)
+          fallback = fallback(evidence)
           emit.(fallback)
           fallback
       end
@@ -259,19 +265,23 @@ defmodule Manifold.Turn do
     |> Enum.take(-@history)
   end
 
-  defp fallback(_added, [violation | _], _answers) do
+  defp fallback(%{violations: [violation | _]}) do
     "That contradicts #{violation.constraint} — which of the two should I keep?"
   end
 
-  defp fallback(added, [], answers) do
+  defp fallback(evidence) do
     [
-      case answers do
+      case evidence.answers do
         [] -> nil
         list -> "From the knowledge base: " <> Enum.map_join(list, "; ", &"#{&1.goal} is #{inspect(&1.answer)}")
       end,
-      case added do
+      case evidence.unanswered do
         [] -> nil
-        list -> "Learned: " <> Enum.map_join(list, " ", & &1.text)
+        _ -> "I have nothing stored that bears on that."
+      end,
+      case evidence.clauses do
+        [] -> nil
+        list -> "Learned: " <> Enum.join(list, " ")
       end
     ]
     |> Enum.reject(&is_nil/1)

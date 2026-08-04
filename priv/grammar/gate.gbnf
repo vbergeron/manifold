@@ -1,0 +1,8 @@
+# GBNF grammar for the turn gate: one label per sentence, in order.
+#
+# The whole output vocabulary is three words, so there is nothing to parse
+# defensively and no way for the model to answer with prose. `Manifold.Gate` maps
+# the labels onto the protocol's two booleans; the only check left is that the
+# number of labels matches the number of sentences.
+root  ::= label (" " label)*
+label ::= "chitchat" | "statement" | "question"
