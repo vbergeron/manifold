@@ -12,5 +12,7 @@ manifold-*.tar
 /models/*.bin
 # Build output of the UI (`ui/npm run build`), served from here at runtime.
 /priv/static/
+# Conversation logs (Manifold.Store.Log).
+/data/
 # Transient scratch dir from the Claude Code harness.
 /.claude/.cc-writes/

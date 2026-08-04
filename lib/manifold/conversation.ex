@@ -28,7 +28,7 @@ defmodule Manifold.Conversation do
   use GenServer, restart: :transient
   require Logger
 
-  alias Manifold.{Clause, Event, Turn}
+  alias Manifold.{Clause, Event, Store, Turn}
   alias Manifold.Prolog.{Answer, MQI}
 
   @registry Manifold.Conversation.Registry
@@ -157,26 +157,76 @@ defmodule Manifold.Conversation do
         # violation". Set once, for the life of this engine.
         {:ok, _} = MQI.run(conn, "set_prolog_flag(unknown, fail)")
 
-        {:ok,
-         %{
-           id: opts[:id],
-           conn: conn,
-           clauses: [],
-           transcript: [],
-           next_clause: 1,
-           next_message: 1,
-           turn: nil
-         }}
+        state = %{
+          id: opts[:id],
+          conn: conn,
+          store: Store.open(opts[:id]),
+          clauses: [],
+          transcript: [],
+          next_clause: 1,
+          next_message: 1,
+          turn: nil
+        }
+
+        {:ok, rehydrate(state)}
 
       {:error, reason} ->
         {:stop, {:mqi_connect_failed, reason}}
     end
   end
 
+  # Replay the durable log into both halves of the conversation. Clauses go through
+  # `insert_clauses/2` — the very same path a live turn uses — so there is exactly
+  # one way a clause reaches Prolog, and a replayed KB cannot diverge from a live
+  # one. Note what is *not* called here: `persist/2`. Replaying must not re-append
+  # what it just read.
+  defp rehydrate(s) do
+    events = Store.replay(s.store)
+
+    s =
+      Enum.reduce(events, s, fn
+        {:clauses, clauses}, acc ->
+          {_delta, acc} = insert_clauses(acc, clauses)
+          acc
+
+        {:message, message}, acc ->
+          %{acc | transcript: acc.transcript ++ [message]}
+      end)
+
+    if events != [] do
+      Logger.info("[conversation] #{s.id}: replayed #{length(s.clauses)} clauses, #{length(s.transcript)} messages")
+    end
+
+    restore_counters(s)
+  end
+
+  # Counters are derived rather than stored, so the log holds only domain events.
+  # An id burned on a clause that was then rejected is reused after a restart,
+  # which is harmless: a reconnecting client re-takes both snapshots.
+  defp restore_counters(s) do
+    %{
+      s
+      | next_clause: 1 + highest(s.clauses, "c"),
+        next_message: 1 + highest(s.transcript, "m")
+    }
+  end
+
+  defp highest(records, prefix) do
+    records
+    |> Enum.map(fn %{id: id} ->
+      case Integer.parse(String.trim_leading(id, prefix)) do
+        {n, ""} -> n
+        _ -> 0
+      end
+    end)
+    |> Enum.max(fn -> 0 end)
+  end
+
   @impl true
   def handle_call({:assert, texts, turn}, _from, s) do
     {clauses, s} = mint_clauses(s, turn, texts)
-    {%{flagged: flagged}, s} = insert_clauses(s, clauses)
+    {%{added: added, flagged: flagged}, s} = insert_clauses(s, clauses)
+    persist(s, [{:clauses, added}])
 
     # Preserve the legacy shape: one `:ok` / `{:error, reason}` per input clause.
     reasons = Map.new(flagged, &{&1.id, &1.reason})
@@ -201,6 +251,9 @@ defmodule Manifold.Conversation do
 
   def handle_call({:commit_clauses, clauses}, _from, s) do
     {delta, s} = insert_clauses(s, clauses)
+    # Only `added` is durable. Flagged clauses were refused — they are not part of
+    # the KB, so replaying them would be replaying a rejection.
+    persist(s, [{:clauses, delta.added}])
     {:reply, delta, s}
   end
 
@@ -216,12 +269,21 @@ defmodule Manifold.Conversation do
   def handle_call({:add_message, turn, kind, fields}, _from, s) do
     id = "m#{s.next_message}"
     message = Map.merge(%{id: id, kind: to_string(kind), turn: turn}, fields)
-    {:reply, message, %{s | next_message: s.next_message + 1, transcript: s.transcript ++ [message]}}
+    s = %{s | next_message: s.next_message + 1, transcript: s.transcript ++ [message]}
+
+    # An `assistant` message is opened empty here and filled by streamed tokens, so
+    # it is not final yet — `finish_assistant/3` persists it instead. Every other
+    # kind arrives complete, which is what keeps a reply to one write rather than
+    # one per token.
+    unless kind == :assistant, do: persist(s, [{:message, message}])
+
+    {:reply, message, s}
   end
 
   def handle_call({:finish_assistant, id, text}, _from, s) do
     existing = Enum.find(s.transcript, &(&1.id == id)) || %{id: id, kind: "assistant", turn: nil}
     message = Map.put(existing, :text, text)
+    persist(s, [{:message, message}])
     {:reply, message, %{s | transcript: replace_message(s.transcript, message)}}
   end
 
@@ -269,11 +331,19 @@ defmodule Manifold.Conversation do
 
   @impl true
   def terminate(_reason, s) do
+    # Nothing is flushed here on purpose: every append has already been synced, so
+    # a conversation is exactly as durable after a `:kill` — which never reaches
+    # `terminate/2` — as after a graceful stop. This only releases handles.
+    Store.close(s.store)
     MQI.close(s.conn)
     :ok
   end
 
   # --- internals -------------------------------------------------------------
+
+  # Durability is synchronous and happens before the caller is replied to, so a
+  # turn that has been acknowledged has already hit the disk.
+  defp persist(s, events), do: Store.append(s.store, events)
 
   defp name_for(opts) do
     cond do

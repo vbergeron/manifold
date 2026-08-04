@@ -26,6 +26,16 @@ defmodule Manifold.Application do
   def start(_type, _args) do
     port = Application.get_env(:manifold, :web_port, 4000)
 
+    # Before any conversation can be opened: create the log directory, or the
+    # Mnesia schema, or nothing at all, depending on the configured adapter. A
+    # store that cannot be prepared is logged and the app still boots — the same
+    # posture as a missing model, since a conversation without durability is
+    # degraded rather than broken.
+    case Manifold.Store.setup() do
+      :ok -> :ok
+      {:error, reason} -> Logger.error("[store] setup failed: #{inspect(reason)} — conversations will not be durable")
+    end
+
     children = [
       # Start Prolog first: conversations depend on the KB server being up.
       Manifold.Prolog.Server,
