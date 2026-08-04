@@ -130,37 +130,61 @@ defmodule Manifold.Turn do
   # Generate goals against the *post-assert* KB and run them under a timeout.
   defp query(conv, turn, text, subscriber) do
     Event.emit(subscriber, :turn_phase, turn, %{phase: "query"})
-    prompt = Prompt.goals(text, Conversation.known_predicates(conv))
+    known = Conversation.known_predicates(conv)
 
-    case generate(prompt, @goals_opts, turn, subscriber) do
-      {:ok, output} ->
-        output
-        |> Clause.split()
-        |> Enum.reject(&(Clause.kind(&1) == :constraint))
-        |> Enum.take(@max_goals)
-        |> Enum.flat_map(&run_goal(conv, turn, &1, subscriber))
+    # A knowledge base with no predicates cannot answer anything. Asking it anyway
+    # costs a generation and yields a goal that `unknown = fail` answers `false` —
+    # which `respond` is instructed to report as "no". That is how "how are you
+    # today?" came back as "No". Produce no evidence instead, and the empty
+    # evidence block tells `respond` to simply converse.
+    if known == [] do
+      Logger.debug("[turn] #{turn}: query skipped, knowledge base has no predicates")
+      []
+    else
+      case generate(Prompt.goals(text, known), @goals_opts, turn, subscriber) do
+        {:ok, output} ->
+          output
+          |> Clause.split()
+          |> Enum.reject(&(Clause.kind(&1) == :constraint))
+          |> Enum.take(@max_goals)
+          |> Enum.flat_map(&run_goal(conv, turn, &1, known, subscriber))
 
-      {:error, _reason} ->
-        []
+        {:error, _reason} ->
+          []
+      end
     end
   end
 
-  defp run_goal(conv, turn, clause, subscriber) do
+  defp run_goal(conv, turn, clause, known, subscriber) do
     goal = Clause.body(clause)
 
-    case Conversation.query(conv, goal, @query_timeout_s) do
-      {:ok, result} ->
-        fields = %{goal: goal, answer: Answer.encode(result)}
-        Event.emit(subscriber, :message, turn, Conversation.add_message(conv, turn, :query, fields))
-        [fields]
-
-      {:error, "time_limit_exceeded"} ->
-        Event.error(subscriber, turn, "prolog_timeout", "#{goal} exceeded #{@query_timeout_s}s")
+    case Clause.signatures(clause) -- known do
+      # The KB has never heard of this predicate, so `unknown = fail` will answer
+      # `false` — a *vacuous* false, indistinguishable from a proved negative once
+      # it reaches the evidence block. "Do you like cats?" becoming `likes(cats)`
+      # is not a question the KB can answer, so it contributes no evidence rather
+      # than a denial. Note the granularity: a *known* predicate applied to an
+      # unknown term is still answered, so "is Zeus mortal?" is legitimately `false`
+      # under the closed-world assumption.
+      [_ | _] = unknown ->
+        Logger.debug("[turn] #{turn}: dropped #{goal}, KB has no #{Enum.join(unknown, ", ")}")
         []
 
-      {:error, reason} ->
-        Event.error(subscriber, turn, "internal", "prolog error on #{goal}: #{inspect(reason)}")
-        []
+      [] ->
+        case Conversation.query(conv, goal, @query_timeout_s) do
+          {:ok, result} ->
+            fields = %{goal: goal, answer: Answer.encode(result)}
+            Event.emit(subscriber, :message, turn, Conversation.add_message(conv, turn, :query, fields))
+            [fields]
+
+          {:error, "time_limit_exceeded"} ->
+            Event.error(subscriber, turn, "prolog_timeout", "#{goal} exceeded #{@query_timeout_s}s")
+            []
+
+          {:error, reason} ->
+            Event.error(subscriber, turn, "internal", "prolog error on #{goal}: #{inspect(reason)}")
+            []
+        end
     end
   end
 

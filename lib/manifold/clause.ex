@@ -133,7 +133,14 @@ defmodule Manifold.Clause do
   end
 
   # `human(socrates)` -> "human/1"; a bare atom -> "raining/0"; junk -> nil.
+  #
+  # A leading `\+` is the negation operator wrapping a goal, not part of the
+  # predicate's name: the signature of `\+ flies(tweety)` is `flies/1`. Without
+  # this the whole term fails to parse and the goal reports *no* predicates, which
+  # would let it slip past any check made against the KB's known ones.
   defp signature(term) do
+    term = term |> String.trim() |> String.replace_prefix("\\+", "")
+
     case Regex.run(~r/^\s*([a-z][a-zA-Z0-9_]*)\s*(\(.*\))?\s*$/s, term) do
       [_, name] -> "#{name}/0"
       [_, name, args] -> "#{name}/#{args |> inner() |> split_top_level() |> length()}"
