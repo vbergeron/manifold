@@ -345,6 +345,30 @@ defmodule Manifold.Conversation do
   # turn that has been acknowledged has already hit the disk.
   defp persist(s, events), do: Store.append(s.store, events)
 
+  # Declare-then-assert, in one round trip.
+  #
+  # This is what makes a conversation's knowledge base actually private. MQI gives
+  # each connection its own *thread* but not its own database: an ordinary
+  # `assertz/1` writes to the process-global store, where every other conversation
+  # can read it. Declaring the predicate `thread_local` first confines its clauses
+  # to this connection's thread — and discards them when the thread ends, which is
+  # why a rehydrated conversation replays into a clean engine instead of doubling
+  # what is already there.
+  #
+  # The order is not a style choice. A predicate asserted *before* being declared
+  # can never be declared afterwards — SWI answers `permission_error` — and its
+  # clauses are then permanently global for the life of the swipl process. So the
+  # two must travel together, and every path that asserts must come through here.
+  # `thread_local/1` is idempotent, so repeating it per clause costs nothing.
+  defp assertion(text) do
+    body = Clause.body(text)
+
+    case Clause.head_signature(text) do
+      nil -> "assertz((#{body}))"
+      signature -> "thread_local(#{signature}), assertz((#{body}))"
+    end
+  end
+
   defp name_for(opts) do
     cond do
       opts[:name] -> opts[:name]
@@ -383,7 +407,7 @@ defmodule Manifold.Conversation do
           nil ->
             # A successful assertz answers `true` or leaks the clause's (unbound)
             # variable bindings — both mean success.
-            case MQI.run(s.conn, "assertz((#{Clause.body(clause.text)}))") do
+            case MQI.run(s.conn, assertion(clause.text)) do
               {:ok, false} -> {added, [%{id: clause.id, reason: "assert failed"} | flagged]}
               {:ok, _} -> {[clause | added], flagged}
               {:error, reason} -> {added, [%{id: clause.id, reason: to_string(reason)} | flagged]}

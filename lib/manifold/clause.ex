@@ -114,6 +114,25 @@ defmodule Manifold.Clause do
   end
 
   @doc """
+  The `"name/arity"` of the predicate a clause is stored *under* — its head.
+
+  Distinct from `signatures/1`, which reports every predicate a clause *mentions*.
+  Only the head matters for declaring storage: `mortal(X) :- human(X).` is stored
+  under `mortal/1` no matter what its body calls.
+
+  A constraint has no head. The term `:- Body` is `:-`/1 applied to the body, so it
+  is stored under `(:-)/1` — written with parentheses because `:-` is an operator.
+  """
+  @spec head_signature(String.t()) :: String.t() | nil
+  def head_signature(text) do
+    case kind(text) do
+      :constraint -> "(:-)/1"
+      :rule -> text |> body() |> String.split(":-", parts: 2) |> hd() |> signature()
+      :fact -> text |> body() |> signature()
+    end
+  end
+
+  @doc """
   The `"name/arity"` signatures a clause mentions: the head for facts and rules,
   every top-level body goal for a constraint (which has no head).
   """

@@ -7,9 +7,19 @@ defmodule Manifold.Prolog.MQI do
 
       <byte-length>.\\n<message-bytes>
 
-  One TCP connection is one Prolog engine, so a connection *is* a knowledge base:
-  clauses `assertz`'d over it persist for the life of the connection. That is the
-  Prolog half of Manifold's "doubling" — see `Manifold.Conversation`.
+  One TCP connection is one Prolog **thread** — but *not* one database. This is the
+  single most important thing to know about MQI here: an ordinary `assertz/1` over
+  any connection writes to the process-global store, so clauses asserted by one
+  connection are visible to every other, and they outlive the connection that made
+  them. Measured, not assumed.
+
+  Isolation therefore has to be asked for. `Manifold.Conversation` declares every
+  predicate `thread_local` before asserting into it, which confines its clauses to
+  the asserting connection's thread and discards them when that thread ends. That
+  is what makes a connection behave as its own knowledge base — the Prolog half of
+  Manifold's "doubling" — and `Manifold.Conversation.assertion/1` is the only place
+  that may assert, because a predicate asserted before being declared can never be
+  declared afterwards.
 
   This implements just enough of the protocol for Manifold: authenticate, `run/3`
   a goal with a timeout, and `close/1`. MQI serializes answers as JSON, so

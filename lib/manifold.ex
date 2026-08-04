@@ -10,7 +10,9 @@ defmodule Manifold do
       decoding (`Manifold.Grammar.prolog/0`) forces the model to emit valid
       Prolog. Talk to it via `Manifold.Llama.Client`.
     * `Manifold.Prolog.Server` — a SWI-Prolog MQI server. Each conversation gets
-      its own connection == its own knowledge base.
+      its own connection, and asserts through `thread_local` predicates so that
+      connection really is its own knowledge base — MQI does not give one per
+      connection for free. See `Manifold.Prolog.MQI`.
 
   A conversation is a `Manifold.Conversation` process pairing the NL transcript
   with that KB. This module is the thin public facade.
