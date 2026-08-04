@@ -43,12 +43,12 @@ something an in-process embedding can't safely do.
 | `Manifold.Prolog.Answer`| Decodes MQI answers into `true` / `false` / bindings, and picks a witness. |
 | `Manifold.Conversation` | The "doubling" unit: typed transcript + a dedicated KB connection. Single source of truth for both UI panels. |
 | `Manifold.Turn`         | The turn loop (below), run in its own monitored process so cancel is a kill. |
-| `Manifold.Gate`         | The one cheap classification call: `{new_facts?, needs_query?}` + the sentence split. |
+| `Manifold.Gate`         | The one cheap classification — lexical, no model call: `{new_facts?, needs_query?}` + the sentence split. |
 | `Manifold.Prompt`       | The three prompts: `extract/2`, `goals/2`, `respond/1`. |
-| `Manifold.Clause`       | Prolog source as data: normalize, classify `fact`/`rule`/`constraint`, split, signatures. |
+| `Manifold.Clause`       | Prolog source as data: normalize, classify `fact`/`rule`/`constraint`, split, signatures. Also refuses the one unsound shape the grammar can't exclude — a fact carrying a variable, which would hold for every term. |
 | `Manifold.Grammar`      | The Prolog GBNF (`priv/grammar/prolog.gbnf`), embedded at compile time. |
 | `Manifold.Event`        | Builds and emits the protocol envelope to a subscriber. |
-| `Manifold.Web.Router`   | The whole HTTP surface: `GET /socket` (upgrade) and `GET /health`. |
+| `Manifold.Web.Router`   | The whole HTTP surface: `GET /socket` (upgrade), `GET /health`, and the built UI (`GET /` plus its hashed assets from `priv/static`). |
 | `Manifold.Web.Socket`   | The `WebSock` handler: framing, `seq`, keepalive. One socket ⇄ one conversation. |
 
 The wire protocol between server and UI is specified in `docs/PROTOCOL.md`; the
@@ -140,7 +140,7 @@ constrains *how* the model generates, never *whether* it generates.
 user message
      │
      ▼
-[GATE]  one LLM call → {new_facts?: bool, needs_query?: bool}
+[GATE]  one lexical pass, no model → {new_facts?: bool, needs_query?: bool}
      │   (classifies the message: chitchat / statement / question / mixed)
      │
      ├─ if new_facts:  extract clauses under the grammar (facts, rules, or
@@ -165,11 +165,14 @@ contradiction. (The grammar allows `:- Body.`; see `priv/grammar/prolog.gbnf`.)
 
 Rules that make this correct:
 
-1. **Gate once, up front.** Both booleans are decided in a single call right
-   after the message — the four outcomes are chitchat / pure statement / pure
-   question / mixed. Abstention ("no facts", "no queries") is a first-class,
-   normal result — which is *why the grammar can stay strict* (`clause+`): it is
-   only ever invoked once the gate has committed to producing clauses.
+1. **Gate once, up front.** Both booleans are decided by a single deterministic
+   lexical pass over the message — no model call, so it is free and instant (the
+   rules are in `Manifold.Gate`, deliberately written so a learned gate could
+   replace them without the rest of the loop noticing). The four outcomes are
+   chitchat / pure statement / pure question / mixed. Abstention ("no facts",
+   "no queries") is a first-class, normal result — which is *why the grammar can
+   stay strict* (`clause+`): it is only ever invoked once the gate has committed
+   to producing clauses.
 2. **Assert before query.** A message often states facts *and* asks about them
    ("Socrates is human. Is he mortal?"). Query goals are generated only *after*
    assertion, so they see the updated KB — a hard read-after-write dependency;

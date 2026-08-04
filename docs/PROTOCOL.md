@@ -18,7 +18,9 @@ live doubling is the point.
 
 - **WebSocket, one connection ⇄ one conversation**, upgraded via **Bandit +
   `WebSockAdapter`** (a `Manifold.Web.Socket` WebSock handler; one handler
-  process per socket, linked to the conversation's `Manifold.Conversation`).
+  process per socket, *monitoring* — not linked to — the conversation's
+  `Manifold.Conversation`, which has to outlive the socket for reconnects to
+  have anything to re-attach to).
 - **Keepalive is ours**: server sends a WebSocket `ping` every ~30 s; a missed
   `pong` past an idle deadline closes the socket. (No Phoenix heartbeat layer.)
 - **Framing is ours**: one JSON object per text frame, the envelope below.
