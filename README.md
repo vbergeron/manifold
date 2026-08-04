@@ -9,39 +9,58 @@ that a pure-LLM chat cannot give reliably.
 
 ## Architecture
 
-Manifold is an Elixir/OTP application that supervises two sidecar servers as
-**independent OS processes**, each in its own `Port`, each restarted on its own:
+Manifold is an Elixir/OTP application. The language model is **one shared** sidecar
+OS process; Prolog is **one OS process per conversation**, owned by that
+conversation:
 
 ```
 Manifold.Supervisor                (one_for_one)
-├── Manifold.Prolog.Server          swipl MQI server   — the knowledge base
-├── Manifold.Llama.Server           llama.cpp server   — the language model
+├── Manifold.Llama.Server           llama.cpp server — shared, one model in memory
 ├── Manifold.Conversation.Registry  conversation_id -> pid, for reconnects
-├── Manifold.Conversation.Supervisor (DynamicSupervisor)
+├── Manifold.Conversation.Supervisor (DynamicSupervisor, max_children)
 │   └── Manifold.Conversation …      one process per conversation:
-│                                    NL transcript + its own Prolog KB connection
+│       │                            NL transcript + its own swipl OS process
+│       ├── swipl (via Port)         Manifold.Prolog.Engine — a private KB
 │       └── Manifold.Turn            the turn loop, spawned + monitored per turn
 └── Bandit                          HTTP/WebSocket endpoint (Manifold.Web.Router)
 ```
 
-Why Elixir: the design is per-conversation, long-lived, stateful, isolated
-processes — OTP's home turf. Crucially, an MQI connection can be bounded
-per-query and, worst case, the whole engine killed by restarting the supervised
-process. That makes **runaway (non-terminating) Prolog queries survivable** —
-something an in-process embedding can't safely do.
+**Why an engine per conversation, not a shared one.** MQI gives each *connection* its
+own thread but **not** its own database: a plain `assertz/1` writes to the
+process-global clause store, so with a shared server every conversation's knowledge
+base silently merges into every other's, and clauses outlive the connection that made
+them. That is measured, not theorised. Per-predicate `thread_local` declarations can
+paper over it, but only for clauses asserted through the one code path that remembers
+to declare — and a predicate asserted before being declared can never be declared
+afterwards. An OS process needs no such discipline. It costs ~90 ms to boot and
+~5.3 MB (PSS).
+
+Why Elixir: the design is per-conversation, long-lived, stateful, isolated processes —
+OTP's home turf. And the runaway-query escape hatch is real rather than nominal. A
+non-terminating goal is bounded per query (MQI timeout), bounded again server-side, and
+worst case the engine is **SIGKILLed** — which is now *non-destructive*: that
+conversation rehydrates from its own log, losing only the in-flight query, and no other
+conversation is touched. With a shared server the same move would have destroyed every
+conversation's knowledge base, so this is the argument that only became true once each
+conversation owned its engine.
+
+Ownership, not supervision, is what guarantees the engine cannot outlive its
+conversation: the conversation holds the `Port`, so when it exits — for *any* reason,
+including `:kill` — the port closes and the sh guardian reaps swipl, with no reliance on
+`terminate/2` running.
 
 ### Key modules
 
 | Module | Role |
 |--------|------|
-| `Manifold.Application`  | Supervision tree (the two sidecars, conversations, and the endpoint). |
-| `Manifold.OsProcess`    | Owns an OS process via a `Port`; a sh guardian kills the child on BEAM death or SIGTERM, so no sidecar is ever orphaned. |
+| `Manifold.Application`  | Supervision tree (the model sidecar, conversations, and the endpoint). |
+| `Manifold.OsProcess`    | Owns an OS process via a `Port`; a sh guardian kills the child when the owning process dies or on SIGTERM, so nothing is ever orphaned. |
 | `Manifold.Llama.Server` | Supervised `llama-server`; polls `/health`; parks in `:no_model` if no GGUF is present. |
 | `Manifold.Llama.Client` | HTTP client; `:grammar` option sends a **GBNF** string for constrained decoding; `stream/3` for token-by-token. |
-| `Manifold.Prolog.Server`| Supervised `swipl` MQI server (accept loop on the main thread). |
-| `Manifold.Prolog.MQI`   | MQI wire protocol (length-prefixed frames, JSON answers). |
+| `Manifold.Prolog.Engine`| One `swipl` MQI server per conversation, owned by it. MQI picks the port and password and reports them on stdout. |
+| `Manifold.Prolog.MQI`   | MQI wire protocol (length-prefixed frames, JSON answers); separates transport failure from a Prolog exception. |
 | `Manifold.Prolog.Answer`| Decodes MQI answers into `true` / `false` / bindings, and picks a witness. |
-| `Manifold.Conversation` | The "doubling" unit: typed transcript + a dedicated KB connection. Single source of truth for both UI panels. |
+| `Manifold.Conversation` | The "doubling" unit: typed transcript + its own engine, which it owns. Single source of truth for both UI panels. Evicts itself when idle; rehydrates from its log on next open. |
 | `Manifold.Turn`         | The turn loop (below), run in its own monitored process so cancel is a kill. |
 | `Manifold.Gate`         | The one cheap classification: each sentence labelled `chitchat`/`statement`/`question` by the model under a grammar, yielding `{new_facts?, needs_query?}` + the sentence split. Falls back to a lexical pass with no model. |
 | `Manifold.Prompt`       | The four prompts: `gate/1`, `extract/2`, `goals/2`, `respond/1`. |

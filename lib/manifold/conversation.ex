@@ -498,29 +498,22 @@ defmodule Manifold.Conversation do
     |> max(@idle_check_floor_ms)
   end
 
-  # Declare-then-assert, in one round trip.
+  # A plain assert. Privacy comes from the engine being this conversation's own OS
+  # process, so nothing needs declaring first.
   #
-  # This is what makes a conversation's knowledge base actually private. MQI gives
-  # each connection its own *thread* but not its own database: an ordinary
-  # `assertz/1` writes to the process-global store, where every other conversation
-  # can read it. Declaring the predicate `thread_local` first confines its clauses
-  # to this connection's thread — and discards them when the thread ends, which is
-  # why a rehydrated conversation replays into a clean engine instead of doubling
-  # what is already there.
+  # There used to be a `thread_local/1` declaration fused to every assert, because MQI
+  # connections into one shared swipl share a global clause store. That is gone with the
+  # shared server: it protected only clauses asserted through this one function, so any
+  # other path — a debugging `MQI.run`, a `consult/1`, a future retract-then-assert —
+  # leaked globally *and permanently*, since a predicate asserted before being declared
+  # can never be declared afterwards. It also ruled out a second, read-only MQI
+  # connection, which is the natural way to stop a long query blocking `kb_request`.
   #
-  # The order is not a style choice. A predicate asserted *before* being declared
-  # can never be declared afterwards — SWI answers `permission_error` — and its
-  # clauses are then permanently global for the life of the swipl process. So the
-  # two must travel together, and every path that asserts must come through here.
-  # `thread_local/1` is idempotent, so repeating it per clause costs nothing.
-  defp assertion(text) do
-    body = Clause.body(text)
-
-    case Clause.head_signature(text) do
-      nil -> "assertz((#{body}))"
-      signature -> "thread_local(#{signature}), assertz((#{body}))"
-    end
-  end
+  # The premise `rehydrate/1` depends on is not weakened by dropping it, but relocated
+  # and strengthened: it used to rest on *thread* death discarding thread-local clauses,
+  # and now rests on *process* death, where a fresh swipl has an empty everything —
+  # clause store, flags, operator table.
+  defp assertion(text), do: "assertz((#{Clause.body(text)}))"
 
   defp name_for(opts) do
     cond do

@@ -65,6 +65,13 @@ are the special messages, rendered distinctly.
 | type | payload | effect |
 |------|---------|--------|
 | `session` | `{conversation_id, sidecars:{llama:bool, prolog:bool}}` | handshake result |
+
+`sidecars.llama` is the shared model server. `sidecars.prolog` is **this conversation's
+own engine** — each conversation owns a private `swipl` process, so there is no global
+Prolog server to report on. Note it is therefore `true` whenever you can see it: a
+`session` frame is only sent once the engine is ready. An engine lost later surfaces as
+the conversation ending (below), not as a `false` here.
+
 | `kb_snapshot` | `{clauses:[clause]}` | (re)initialise left panel |
 | `kb_delta` | `{added:[clause], retracted:[id], flagged:[{id,reason}]}` | mutate left panel |
 | `transcript_snapshot` | `{messages:[message]}` | (re)initialise right panel |
@@ -141,11 +148,22 @@ Errors are typed events, never silent drops:
 | `code` | when |
 |--------|------|
 | `llama_unavailable` | model not loaded / server down |
-| `prolog_unavailable` | MQI server down |
+| `prolog_unavailable` | this conversation's Prolog engine could not be started |
 | `prolog_timeout` | a query hit its time cap |
 | `grammar_parse_failed` | model output could not be parsed (should be rare under GBNF) |
 | `bad_message` | malformed/unknown client frame |
+| `at_capacity` | server declined a *new* conversation; it is at its configured limit |
 | `internal` | unexpected server error |
+
+`at_capacity` is distinct from `prolog_unavailable` on purpose: the engine layer is
+healthy and the server is declining, which is a different thing to investigate. It is
+sent **and then the socket is closed with code 1013 ("Try Again Later")**, so a client's
+normal reconnect-with-backoff retries the same conversation. Clients already holding a
+conversation are unaffected — capacity is only checked when one must be created, so a
+full server still admits reconnects to conversations it is already keeping.
+
+Adding a code is backward compatible: `v` is unchanged, and a client that does not know
+this code still renders its `message`.
 
 ## Versioning
 

@@ -13,9 +13,9 @@ elixir = "1.18.4-otp-27"
 [env]
 # Where the GGUF model lives; override locally. Loaded by the llama.cpp server.
 MANIFOLD_MODEL = "{{config_root}}/models/model.gguf"
-# Ports for the two supervised sidecar servers.
+# Port for the shared model server. Prolog has none: each conversation gets its own
+# swipl, and MQI assigns it a free loopback port at boot.
 MANIFOLD_LLAMA_PORT = "8080"
-MANIFOLD_PROLOG_PORT = "8090"
 
 [settings]
 # asdf-style plugins (swiprolog) need this.
