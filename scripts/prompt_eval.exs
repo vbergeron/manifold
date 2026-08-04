@@ -9,7 +9,7 @@ wait = fn wait, label, fun, n ->
   end
 end
 
-wait.(wait, "prolog", &Manifold.Prolog.Server.ready?/0, 30)
+# No Prolog wait: engines are per-conversation and boot on demand.
 wait.(wait, "llama", &Manifold.Llama.Server.ready?/0, 120)
 
 # {input, known_predicates} — the last few probe vocabulary reuse.
@@ -41,11 +41,15 @@ Enum.each(cases, fn {input, preds} ->
 
   IO.puts("OUT:\n" <> (out |> String.trim() |> String.replace("\n", "\n      ") |> then(&("      " <> &1))))
 
-  # Does it actually load into a KB?
+  # Does it actually load into a KB? Each case needs a *fresh* KB — the vocabulary-reuse
+  # case below depends on it — so open one per case and stop it again. Without the stop
+  # this loop would hold ten swipl engines at once, since one engine per conversation
+  # means a conversation nobody stops is a process nobody reaps.
   clauses = out |> String.split(".", trim: true) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
   {:ok, c} = Manifold.start_conversation()
   results = Manifold.assert(c, clauses)
   IO.puts("LOAD: #{inspect(results)}")
+  :ok = Manifold.stop_conversation(c)
 end)
 
 IO.puts("\n" <> String.duplicate("═", 70))
@@ -57,5 +61,6 @@ IO.inspect(Manifold.query(kb, "whale(A), fish(A)"), label: "before: constraint v
 # Now a contradicting fact arrives.
 Manifold.assert(kb, ["fish(willy)"])
 IO.inspect(Manifold.query(kb, "whale(A), fish(A)"), label: "after fish(willy): violated?")
+:ok = Manifold.stop_conversation(kb)
 
 IO.puts("\ndone")

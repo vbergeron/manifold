@@ -109,7 +109,10 @@ wait = fn wait, label, fun, n ->
   end
 end
 
-wait.(wait, "prolog", &Manifold.Prolog.Server.ready?/0, 60)
+# No Prolog readiness poll: there is no shared server to wait for. An engine is launched
+# by the conversation that owns it, and `open_conversation/1` does not return until it is
+# ready — so a successful open *is* the readiness check, and a stricter one.
+Check.ok("a conversation can be opened (engines are spawnable)", match?({:ok, _, _}, Manifold.open_conversation(nil)))
 
 llama? =
   try do
@@ -194,6 +197,58 @@ clauses = Manifold.Conversation.prepare_clauses(conv2, "t_x", ["fish(willy)"])
 violations = Manifold.Conversation.check_constraints(conv2)
 Check.ok("violation detected", match?([%{witness: %{"A" => "willy"}}], violations))
 Check.ok("undefined predicates are not violations", Manifold.Conversation.query(conv2, "nosuch(X)") == {:ok, false})
+
+# --- 2b. isolation between conversations ------------------------------------
+# The property the whole per-engine architecture exists for, and which was completely
+# untested while it was silently broken.
+IO.puts("\n== isolation ==")
+{:ok, id_a, iso_a} = Manifold.open_conversation(nil)
+{:ok, _id_b, iso_b} = Manifold.open_conversation(nil)
+
+engines = fn -> {o, _} = System.cmd("bash", ["-c", "pgrep -x swipl | wc -l"]); String.trim(o) |> String.to_integer() end
+Check.ok("each conversation is its own OS process (#{engines.()} swipl running)", engines.() >= 2)
+
+Manifold.Conversation.assert(iso_a, ["secret_of_a(xyzzy)"])
+Check.ok("B cannot see A's clauses", Manifold.Conversation.query(iso_b, "secret_of_a(X)") == {:ok, false})
+Check.ok("A still sees its own", Manifold.Conversation.query(iso_a, "secret_of_a(xyzzy)") == {:ok, true})
+
+# `flag/3` is a *process*-global counter, so this distinguishes separate OS processes from
+# per-connection tricks: it fails on a shared server even with thread_local predicates.
+Manifold.Conversation.query(iso_a, "flag(shared, _, 42)")
+Check.ok("process-global flag/3 does not leak", Manifold.Conversation.query(iso_b, "flag(shared, 0, 0)") == {:ok, true})
+
+# Likewise the operator table, which is process-wide.
+Manifold.Conversation.query(iso_a, "op(700, xfx, (~~>))")
+Check.ok("the operator table does not leak", match?({:error, _}, Manifold.Conversation.query(iso_b, "X = (a ~~> b)")))
+
+# An assert that bypasses the normal path used to leak globally; the OS boundary contains
+# it regardless of how it was asserted.
+Manifold.Conversation.query(iso_a, "assertz(undeclared_ghost(boo))")
+Check.ok("even an undeclared raw assertz stays private", Manifold.Conversation.query(iso_b, "undeclared_ghost(X)") == {:ok, false})
+
+# --- 2c. the kill switch, and rehydrate exactness ---------------------------
+IO.puts("\n== engine kill + rehydrate ==")
+kb_before = Manifold.Conversation.kb_snapshot(iso_a)
+:ok = Manifold.kill_engine(id_a)
+Process.sleep(1_200)
+
+Check.ok("B survives A's engine being killed", Manifold.Conversation.query(iso_b, "flag(shared, 0, 0)") == {:ok, true})
+
+{:ok, ^id_a, revived} = Manifold.open_conversation(id_a)
+Check.ok("A came back as a new process", revived != iso_a)
+Check.ok("A's KB rehydrated exactly", Manifold.Conversation.kb_snapshot(revived) == kb_before)
+
+# The double-assert guard: a fresh engine plus a replayed log must yield ONE copy of each
+# clause, not two. Counting solutions is the only way to see it — a duplicated KB still
+# answers `true` to everything it answered `true` to before, which is exactly how the
+# duplication went unnoticed. Counted here rather than with `aggregate_all/3` because
+# `unknown = fail` makes every autoloaded library predicate silently fail.
+Check.ok(
+  "replay does not double-assert",
+  match?({:ok, {:bindings, [_single]}}, Manifold.Conversation.query(revived, "secret_of_a(X)"))
+)
+
+:ok = Manifold.stop_conversation(id_a)
 
 # --- 3. the real socket -----------------------------------------------------
 IO.puts("\n== websocket #{4000} ==")

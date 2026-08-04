@@ -10,8 +10,12 @@ if port = System.get_env("MANIFOLD_LLAMA_PORT") do
   config :manifold, llama_port: String.to_integer(port)
 end
 
-if port = System.get_env("MANIFOLD_PROLOG_PORT") do
-  config :manifold, prolog_port: String.to_integer(port)
+if max = System.get_env("MANIFOLD_MAX_CONVERSATIONS") do
+  config :manifold, max_conversations: String.to_integer(max)
+end
+
+if idle = System.get_env("MANIFOLD_CONVERSATION_IDLE_MS") do
+  config :manifold, conversation_idle_ms: String.to_integer(idle)
 end
 
 if port = System.get_env("MANIFOLD_WEB_PORT") do

@@ -12,8 +12,8 @@ wait = fn wait, label, fun, n ->
   end
 end
 
-IO.puts("waiting for sidecars (model load can take ~10-20s on CPU)...")
-wait.(wait, "prolog", &Manifold.Prolog.Server.ready?/0, 30)
+IO.puts("waiting for the model (load can take ~10-20s on CPU)...")
+# No Prolog wait: engines are per-conversation and boot on demand in ~90 ms.
 wait.(wait, "llama", &Manifold.Llama.Server.ready?/0, 120)
 IO.inspect(Manifold.ready?(), label: "ready")
 

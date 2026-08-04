@@ -72,8 +72,17 @@ defmodule Manifold.Web.Socket do
     end
   end
 
-  # The conversation died (MQI gone, or a supervisor restart). Say so; the client
-  # can re-`open` to get a fresh one.
+  # Evicted for idleness — a `:normal` exit, which the conversation uses precisely so it
+  # can be told apart from a crash. Its knowledge base is on disk, so re-`open` and the
+  # client never learns it happened: a `session` frame is a full re-handshake and the
+  # client resets its `seq` watermark on one.
+  def handle_info({:DOWN, ref, :process, _pid, :normal}, %{monitor: ref, conv_id: id} = state) do
+    Logger.debug("[socket] conversation #{id} was evicted; re-opening transparently")
+    dispatch("open", %{"payload" => %{"conversation_id" => id}}, %{state | conv: nil, monitor: nil})
+  end
+
+  # Anything else is a real failure (the engine died, a callback crashed). Report it and
+  # let the client's reconnect rebuild.
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{monitor: ref} = state) do
     state = %{state | conv: nil, monitor: nil}
     push(state, [{:error, nil, %{code: "internal", message: "conversation ended: #{inspect(reason)}"}}])
@@ -97,11 +106,28 @@ defmodule Manifold.Web.Socket do
         if state.monitor, do: Process.demonitor(state.monitor, [:flush])
         state = %{state | conv: pid, conv_id: id, monitor: Process.monitor(pid)}
 
+        # Attaching tells the conversation it is being watched, so idle eviction will not
+        # reap a quiet-but-open tab. It also reports this conversation's *own* engine
+        # state, which is what `sidecars.prolog` now means.
+        engine = Conversation.attach(pid, self())
+
         push(state, [
-          {:session, nil, %{conversation_id: id, sidecars: Manifold.ready?()}},
+          {:session, nil,
+           %{
+             conversation_id: id,
+             sidecars: %{llama: Manifold.ready?().llama, prolog: engine.prolog}
+           }},
           {:kb_snapshot, nil, %{clauses: Conversation.kb_snapshot(pid)}},
           {:transcript_snapshot, nil, %{messages: Conversation.transcript_snapshot(pid)}}
         ])
+
+      # Declining for capacity is not "Prolog is down" — the engine layer is healthy. The
+      # 1013 close is what makes it recoverable: the client's existing backoff reconnect
+      # retries the *same* conversation, where pushing an error and leaving the socket
+      # open would strand it with a dead composer forever.
+      {:error, :at_capacity} ->
+        {frames, state} = error_frames(state, nil, "at_capacity", "server is at capacity, retry shortly")
+        {:stop, :normal, {1013, "at capacity"}, frames, state}
 
       {:error, reason} ->
         fail(state, nil, "prolog_unavailable", "cannot open a knowledge base: #{inspect(reason)}")
@@ -150,6 +176,13 @@ defmodule Manifold.Web.Socket do
   defp fail(state, turn, code, message) do
     Logger.debug("[socket] #{code}: #{message}")
     push(state, [{:error, turn, %{code: code, message: message}}])
+  end
+
+  # Same framing as `fail/4`, but hands back the frames instead of a `:push` tuple, so a
+  # caller can send them *and* close the socket in one return.
+  defp error_frames(state, turn, code, message) do
+    Logger.warning("[socket] #{code}: #{message}")
+    stamp([Event.new(:error, turn, %{code: code, message: message})], state)
   end
 
   # `seq` is assigned at the moment of sending, in send order — that is what lets

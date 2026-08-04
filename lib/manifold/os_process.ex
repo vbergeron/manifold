@@ -65,15 +65,64 @@ defmodule Manifold.OsProcess do
     end
   end
 
-  @doc "Best-effort SIGTERM of an OS pid. Safe to call with `nil`."
-  @spec kill(non_neg_integer() | nil) :: :ok
-  def kill(nil), do: :ok
+  # How long a child gets to honour SIGTERM before it is killed outright.
+  @escalate_after_ms 2_000
 
-  def kill(os_pid) when is_integer(os_pid) do
-    System.cmd("kill", ["-TERM", Integer.to_string(os_pid)], stderr_to_stdout: true)
+  @doc """
+  Signal an OS pid, escalating to `SIGKILL` if it does not go away. Safe with `nil`.
+
+  `signal` may be `"TERM"` (default, escalating) or `"KILL"` (immediate, no grace). Death
+  is *confirmed* rather than assumed: best-effort-and-shrug was fine for two long-lived
+  sidecars, but one engine per conversation means this runs constantly, and a child that
+  ignores SIGTERM — a goal spinning inside a foreign predicate never reaches its signal
+  handler — would otherwise leak silently.
+  """
+  @spec kill(non_neg_integer() | nil, String.t()) :: :ok
+  def kill(os_pid, signal \\ "TERM")
+
+  def kill(nil, _signal), do: :ok
+
+  def kill(os_pid, "KILL") when is_integer(os_pid) do
+    signal(os_pid, "KILL")
+    :ok
+  end
+
+  def kill(os_pid, signal) when is_integer(os_pid) do
+    signal(os_pid, signal)
+
+    unless await_death(os_pid, System.monotonic_time(:millisecond) + @escalate_after_ms) do
+      Logger.warning("[os] pid #{os_pid} ignored SIG#{signal} for #{@escalate_after_ms}ms — escalating to SIGKILL")
+      signal(os_pid, "KILL")
+    end
+
+    :ok
+  end
+
+  defp signal(os_pid, sig) do
+    System.cmd("kill", ["-#{sig}", Integer.to_string(os_pid)], stderr_to_stdout: true)
     :ok
   rescue
     _ -> :ok
+  end
+
+  defp await_death(os_pid, deadline) do
+    if alive?(os_pid) do
+      if System.monotonic_time(:millisecond) >= deadline do
+        false
+      else
+        Process.sleep(50)
+        await_death(os_pid, deadline)
+      end
+    else
+      true
+    end
+  end
+
+  # `kill -0` signals nothing and only reports whether the pid is signallable.
+  defp alive?(os_pid) do
+    match?({_, 0}, System.cmd("kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true))
+  rescue
+    _ -> false
   end
 
   defp maybe(_key, nil), do: []

@@ -25,16 +25,46 @@ defmodule Manifold.Conversation do
   and, when given an `:id`, registered in `Manifold.Conversation.Registry` so a
   reconnecting socket can find it again.
   """
-  use GenServer, restart: :transient
+  # `:temporary`, not `:transient`, for two reasons that only appear once each
+  # conversation owns a fallible OS process:
+  #
+  #   * Blast radius. A DynamicSupervisor defaults to `max_restarts: 3, max_seconds: 5`.
+  #     One conversation whose engine cannot boot would crash-loop, exceed the intensity,
+  #     and take the *supervisor* down — killing every other live conversation. Temporary
+  #     children are never restarted, so they cannot contribute to restart intensity.
+  #   * Race. Under `:transient` there is a window during automatic restart where the
+  #     registry entry is absent, so a concurrent `open_conversation(id)` misses the
+  #     lookup and starts a *second* conversation for the same id — two engines and two
+  #     store handles appending to one log.
+  #
+  # Recovery is the client's reconnect instead, which is strictly better informed: the
+  # socket reports the death, the client re-`open`s, and `Manifold.Store` rehydrates.
+  use GenServer, restart: :temporary
   require Logger
 
   alias Manifold.{Clause, Event, Store, Turn}
-  alias Manifold.Prolog.{Answer, MQI}
+  alias Manifold.Prolog.{Answer, Engine, MQI}
 
   @registry Manifold.Conversation.Registry
 
   # A constraint body is a goal like any other: it needs a kill switch.
   @check_timeout_s 5
+
+  # Snapshots can be requested while `handle_continue(:rehydrate, …)` is still replaying,
+  # so they need more than the 5 s default — otherwise a large knowledge base times out
+  # the *socket* (dropping the client) while the conversation is perfectly healthy.
+  @snapshot_timeout 60_000
+
+  # One timer for the life of the conversation, compared against a monotonic stamp.
+  # Deliberately not the GenServer `:timeout` return value: that would have to be
+  # threaded through every one of ~15 return points and is silently lost the first time
+  # someone adds a clause without it.
+  #
+  # The interval scales with the timeout instead of being a flat minute, so that a short
+  # timeout is actually honoured promptly — 60 s granularity on a 15-minute timeout is
+  # irrelevant, but on a 5-second one it is the whole behaviour.
+  @idle_check_cap_ms 60_000
+  @idle_check_floor_ms 500
 
   @type clause :: %{id: String.t(), text: String.t(), kind: String.t(), turn: String.t() | nil}
   @type message :: %{id: String.t(), kind: String.t(), turn: String.t() | nil}
@@ -64,13 +94,26 @@ defmodule Manifold.Conversation do
   @doc "Number of clauses asserted so far this conversation."
   def kb_size(pid), do: GenServer.call(pid, :kb_size)
 
+  @doc """
+  Register `subscriber` as attached to this conversation, and report engine readiness.
+
+  Attachment exists so idle eviction can tell a genuinely abandoned conversation from
+  one whose browser tab is simply quiet: evicting the latter would be pure churn, since
+  the client would immediately reconnect and force a rehydrate. It also makes "the
+  conversation must outlive its socket" an explicit contract rather than an accident.
+
+  The conversation monitors `subscriber` and drops it when it goes away.
+  """
+  @spec attach(pid(), pid()) :: %{prolog: boolean()}
+  def attach(pid, subscriber), do: GenServer.call(pid, {:attach, subscriber})
+
   @doc "Every clause in the KB, oldest first — the `kb_snapshot` payload."
   @spec kb_snapshot(pid()) :: [clause()]
-  def kb_snapshot(pid), do: GenServer.call(pid, :kb_snapshot)
+  def kb_snapshot(pid), do: GenServer.call(pid, :kb_snapshot, @snapshot_timeout)
 
   @doc "Every transcript message, oldest first — the `transcript_snapshot` payload."
   @spec transcript_snapshot(pid()) :: [message()]
-  def transcript_snapshot(pid), do: GenServer.call(pid, :transcript_snapshot)
+  def transcript_snapshot(pid), do: GenServer.call(pid, :transcript_snapshot, @snapshot_timeout)
 
   @doc "`name/arity` of everything the KB knows about, for the next prompt's vocabulary."
   @spec known_predicates(pid()) :: [String.t()]
@@ -149,30 +192,60 @@ defmodule Manifold.Conversation do
 
   @impl true
   def init(opts) do
-    case MQI.connect() do
-      {:ok, conn} ->
-        # Integrity constraints mention predicates that may not exist yet;
-        # without this an undefined predicate throws existence_error instead of
-        # failing, and every check would look like an error rather than "no
-        # violation". Set once, for the life of this engine.
-        {:ok, _} = MQI.run(conn, "set_prolog_flag(unknown, fail)")
+    # Owning the engine's Port is what makes the engine unable to outlive this process:
+    # when we exit for *any* reason, including `:kill`, the port closes and the sh
+    # guardian reaps swipl. Trapping exits is what lets us also hear about the port
+    # dying, and is a precondition for `terminate/2` running at all — a GenServer that
+    # does not trap exits is killed outright by the supervisor's `:shutdown`.
+    Process.flag(:trap_exit, true)
 
-        state = %{
-          id: opts[:id],
-          conn: conn,
-          store: Store.open(opts[:id]),
-          clauses: [],
-          transcript: [],
-          next_clause: 1,
-          next_message: 1,
-          turn: nil
-        }
+    with {:ok, engine} <- Engine.start(),
+         {:ok, engine} <- Engine.await_ready(engine),
+         {:ok, conn} <- Engine.connect(engine),
+         {:ok, engine} <- Engine.identify(engine, conn),
+         # Integrity constraints mention predicates that may not exist yet; without this
+         # an undefined predicate throws existence_error instead of failing, and every
+         # check would look like an error rather than "no violation". Per engine.
+         {:ok, _} <- MQI.run(conn, "set_prolog_flag(unknown, fail)") do
+      Process.send_after(self(), :idle_check, idle_check_ms())
 
-        {:ok, rehydrate(state)}
+      state = %{
+        id: opts[:id],
+        engine: engine,
+        conn: conn,
+        store: nil,
+        clauses: [],
+        transcript: [],
+        next_clause: 1,
+        next_message: 1,
+        turn: nil,
+        attached: %{},
+        last_activity: now()
+      }
 
-      {:error, reason} ->
-        {:stop, {:mqi_connect_failed, reason}}
+      # Publish the engine's OS pid as our registry value, so `Manifold.kill_engine/1`
+      # can signal it *without* going through this mailbox. That matters precisely when
+      # the kill switch is needed: a conversation blocked in `MQI.run/3` on a runaway
+      # goal cannot answer a call until that goal returns.
+      if opts[:id] do
+        Registry.update_value(@registry, opts[:id], fn _ -> %{os_pid: Engine.os_pid(engine)} end)
+      end
+
+      # Everything whose failure means "cannot start" belongs above, in `init/1`, where
+      # `{:stop, reason}` is *not* a crash: `start_child` simply returns `{:error,
+      # reason}` and the socket renders it as `error{prolog_unavailable}`. Replay goes
+      # below, where a failure means the engine just died and crashing is right.
+      {:ok, state, {:continue, :rehydrate}}
+    else
+      {:error, reason} -> {:stop, {:prolog_unavailable, reason}}
     end
+  end
+
+  @impl true
+  def handle_continue(:rehydrate, s) do
+    # Runs before any queued message, so no caller can observe a half-built KB and there
+    # is no "not ready yet" state to represent — a call simply takes longer.
+    {:noreply, rehydrate(%{s | store: Store.open(s.id)})}
   end
 
   # Replay the durable log into both halves of the conversation. Clauses go through
@@ -231,16 +304,31 @@ defmodule Manifold.Conversation do
     # Preserve the legacy shape: one `:ok` / `{:error, reason}` per input clause.
     reasons = Map.new(flagged, &{&1.id, &1.reason})
     results = Enum.map(clauses, fn c -> if r = reasons[c.id], do: {:error, r}, else: :ok end)
-    {:reply, results, s}
+    {:reply, results, touch(s)}
   end
 
   def handle_call({:query, goal, timeout_s}, _from, s) do
-    {:reply, MQI.run(s.conn, goal, timeout_s), s}
+    case MQI.run(s.conn, goal, timeout_s) do
+      # The engine is gone, so this is not an answer. Handing it back as one is how a
+      # dead knowledge base starts quietly lying — the caller cannot tell "Prolog says
+      # no" from "the socket is dead". Stop, and let the client's reconnect rehydrate.
+      {:error, {:transport, reason}} = err ->
+        Logger.error("[conversation] #{s.id}: engine transport failed: #{inspect(reason)}")
+        {:stop, {:mqi_transport, reason}, err, s}
+
+      result ->
+        {:reply, result, touch(s)}
+    end
+  end
+
+  def handle_call({:attach, subscriber}, _from, s) do
+    ref = Process.monitor(subscriber)
+    {:reply, %{prolog: true}, touch(%{s | attached: Map.put(s.attached, ref, subscriber)})}
   end
 
   def handle_call(:kb_size, _from, s), do: {:reply, length(s.clauses), s}
-  def handle_call(:kb_snapshot, _from, s), do: {:reply, s.clauses, s}
-  def handle_call(:transcript_snapshot, _from, s), do: {:reply, s.transcript, s}
+  def handle_call(:kb_snapshot, _from, s), do: {:reply, s.clauses, touch(s)}
+  def handle_call(:transcript_snapshot, _from, s), do: {:reply, s.transcript, touch(s)}
   def handle_call(:known_predicates, _from, s), do: {:reply, predicates(s.clauses), s}
   def handle_call(:current_turn, _from, s), do: {:reply, s.turn && s.turn.id, s}
 
@@ -289,7 +377,7 @@ defmodule Manifold.Conversation do
 
   def handle_call({:run_turn, turn, text, subscriber}, _from, %{turn: nil} = s) do
     {pid, ref} = spawn_monitor(Turn, :run, [self(), turn, text, subscriber])
-    {:reply, :ok, %{s | turn: %{id: turn, pid: pid, ref: ref, subscriber: subscriber}}}
+    {:reply, :ok, touch(%{s | turn: %{id: turn, pid: pid, ref: ref, subscriber: subscriber}})}
   end
 
   def handle_call({:run_turn, _turn, _text, _subscriber}, _from, s) do
@@ -327,15 +415,65 @@ defmodule Manifold.Conversation do
     {:noreply, %{s | turn: nil}}
   end
 
+  # An attached client went away. The conversation deliberately survives it — that is
+  # what makes `open {conversation_id}` reconnects work — but it now becomes evictable.
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{attached: attached} = s)
+      when is_map_key(attached, ref) do
+    {:noreply, %{s | attached: Map.delete(attached, ref)}}
+  end
+
+  def handle_info(:idle_check, s) do
+    Process.send_after(self(), :idle_check, idle_check_ms())
+    idle_ms = now() - s.last_activity
+
+    # All three conditions matter. A turn in flight is never evictable however long it
+    # has been generating; an attached client means eviction would only cause an
+    # immediate reconnect and rehydrate, which is pure churn.
+    if idle_ms > idle_timeout() and s.turn == nil and s.attached == %{} do
+      Logger.info(
+        "[conversation] #{s.id}: evicted after #{div(idle_ms, 1000)}s idle " <>
+          "(#{length(s.clauses)} clauses, #{length(s.transcript)} messages)"
+      )
+
+      # `:normal` on purpose: it is what lets the socket tell eviction apart from a crash
+      # and re-open transparently, and it is not a restart trigger under any strategy.
+      {:stop, :normal, s}
+    else
+      {:noreply, s}
+    end
+  end
+
+  # --- the engine's own port -------------------------------------------------
+  #
+  # These must sit above the catch-all below, which would otherwise swallow the death of
+  # the knowledge base and leave us serving a corpse.
+
+  def handle_info({port, {:exit_status, code}}, %{engine: %{port: port}} = s) do
+    Logger.error("[conversation] #{s.id}: swipl exited status=#{code}")
+    {:stop, {:engine_exited, code}, s}
+  end
+
+  def handle_info({port, {:data, chunk}}, %{engine: %{port: port} = engine} = s) do
+    {:noreply, %{s | engine: Engine.log_data(engine, chunk)}}
+  end
+
+  def handle_info({:EXIT, port, reason}, %{engine: %{port: port}} = s) do
+    {:stop, {:engine_port_down, reason}, s}
+  end
+
   def handle_info(_msg, s), do: {:noreply, s}
 
   @impl true
   def terminate(_reason, s) do
-    # Nothing is flushed here on purpose: every append has already been synced, so
-    # a conversation is exactly as durable after a `:kill` — which never reaches
+    # Nothing is flushed here on purpose: every append has already been synced, so a
+    # conversation is exactly as durable after a `:kill` — which never reaches
     # `terminate/2` — as after a graceful stop. This only releases handles.
-    Store.close(s.store)
+    #
+    # Stopping the engine is likewise a tidiness measure, not the guarantee: closing our
+    # port would reap swipl regardless, which is what covers the `:kill` path.
+    if s.store, do: Store.close(s.store)
     MQI.close(s.conn)
+    Engine.stop(s.engine)
     :ok
   end
 
@@ -344,6 +482,21 @@ defmodule Manifold.Conversation do
   # Durability is synchronous and happens before the caller is replied to, so a
   # turn that has been acknowledged has already hit the disk.
   defp persist(s, events), do: Store.append(s.store, events)
+
+  # Bumped only by client-driven entry points. Deliberately *not* by streamed assistant
+  # tokens (already covered by the enclosing turn) or the turn's own DOWN.
+  defp touch(s), do: %{s | last_activity: now()}
+
+  defp now, do: System.monotonic_time(:millisecond)
+
+  defp idle_timeout, do: Application.get_env(:manifold, :conversation_idle_ms, 900_000)
+
+  defp idle_check_ms do
+    idle_timeout()
+    |> div(4)
+    |> min(@idle_check_cap_ms)
+    |> max(@idle_check_floor_ms)
+  end
 
   # Declare-then-assert, in one round trip.
   #

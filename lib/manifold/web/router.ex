@@ -36,10 +36,14 @@ defmodule Manifold.Web.Router do
     |> halt()
   end
 
+  # `ok` and `sidecars` keep their exact shape; `conversations` is added for operators,
+  # which is safe here because /health has no version contract the way the socket does.
   get "/health" do
+    body = %{ok: true, sidecars: Manifold.ready?(), conversations: Manifold.conversations()}
+
     conn
     |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{ok: true, sidecars: Manifold.ready?()}))
+    |> send_resp(200, Jason.encode!(body))
   end
 
   get "/" do

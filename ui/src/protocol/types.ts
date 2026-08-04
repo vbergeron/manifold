@@ -105,10 +105,15 @@ export type ErrorCode =
   | "prolog_timeout"
   | "grammar_parse_failed"
   | "bad_message"
+  /** Server declined to open a new conversation; the socket closes with 1013 and the
+   *  normal backoff reconnect retries the same conversation. */
+  | "at_capacity"
   | "internal";
 
 export interface SessionPayload {
   conversation_id: string;
+  /** `prolog` is *this conversation's* engine, not a shared server — each conversation
+   *  owns its own swipl process. */
   sidecars: { llama: boolean; prolog: boolean };
 }
 

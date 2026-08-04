@@ -8,18 +8,14 @@ defmodule Manifold.Prolog.MQI do
       <byte-length>.\\n<message-bytes>
 
   One TCP connection is one Prolog **thread** — but *not* one database. This is the
-  single most important thing to know about MQI here: an ordinary `assertz/1` over
-  any connection writes to the process-global store, so clauses asserted by one
-  connection are visible to every other, and they outlive the connection that made
-  them. Measured, not assumed.
+  single most important thing to know about MQI: an ordinary `assertz/1` over any
+  connection writes to the process-global store, so clauses asserted by one connection
+  are visible to every other, and they outlive the connection that made them. Measured,
+  not assumed.
 
-  Isolation therefore has to be asked for. `Manifold.Conversation` declares every
-  predicate `thread_local` before asserting into it, which confines its clauses to
-  the asserting connection's thread and discards them when that thread ends. That
-  is what makes a connection behave as its own knowledge base — the Prolog half of
-  Manifold's "doubling" — and `Manifold.Conversation.assertion/1` is the only place
-  that may assert, because a predicate asserted before being declared can never be
-  declared afterwards.
+  That is a fact about MQI, not a problem this module solves. Manifold's answer is one
+  swipl *process* per conversation — see `Manifold.Prolog.Engine`, which is also where
+  a connection's credentials come from.
 
   This implements just enough of the protocol for Manifold: authenticate, `run/3`
   a goal with a timeout, and `close/1`. MQI serializes answers as JSON, so
@@ -34,13 +30,17 @@ defmodule Manifold.Prolog.MQI do
 
   @recv_timeout 30_000
 
-  @doc "Open and authenticate an MQI connection using `Manifold.Prolog.Server`'s credentials."
-  @spec connect(keyword()) :: {:ok, t()} | {:error, term()}
-  def connect(opts \\ []) do
-    %{host: host, port: port, password: password} = Manifold.Prolog.Server.connection()
-    host = Keyword.get(opts, :host, host)
-    port = Keyword.get(opts, :port, port)
+  @typedoc "Where an engine is listening, as reported by `Manifold.Prolog.Engine.connection/1`."
+  @type target :: %{host: String.t(), port: pos_integer(), password: String.t()}
 
+  @doc """
+  Open and authenticate a connection to the engine described by `target`.
+
+  Deliberately takes its target rather than reaching for a global server: there is one
+  engine per conversation, each with its own port and password.
+  """
+  @spec connect(target()) :: {:ok, t()} | {:error, term()}
+  def connect(%{host: host, port: port, password: password}) do
     with {:ok, sock} <-
            :gen_tcp.connect(
              String.to_charlist(host),
@@ -71,24 +71,33 @@ defmodule Manifold.Prolog.MQI do
   Run `goal` (a Prolog goal string, no trailing `.`) with a timeout in seconds
   (`-1` = no limit). Returns:
 
-    * `{:ok, true}`             — succeeded, no bindings
+    * `{:ok, true}`              — succeeded, no bindings
     * `{:ok, {:bindings, sols}}` — succeeded; `sols` is the decoded JSON list of
                                    solutions, each a list of `=`-binding maps
-    * `{:ok, false}`            — failed
-    * `{:error, reason}`        — a Prolog exception (e.g. `"time_limit_exceeded"`)
+    * `{:ok, false}`             — failed
+    * `{:error, reason}`         — a Prolog exception (e.g. `"time_limit_exceeded"`)
+    * `{:error, {:transport, r}}` — **the engine is gone**, not an answer
+
+  The last case is deliberately distinguishable. Conflating "Prolog says no" with "the
+  socket is dead" is how a dead engine gets reported as a plain negative: a clause
+  flagged `"closed"` and not persisted, a constraint quietly recorded as unchecked so
+  contradiction detection stops, or `{:error, :closed}` handed to a client as though it
+  were an answer. Callers must treat `{:transport, _}` as fatal to the conversation and
+  let it rehydrate — the store is the truth.
   """
   @spec run(t(), String.t(), integer()) :: {:ok, term()} | {:error, term()}
   def run(%__MODULE__{} = conn, goal, timeout_s \\ 10) do
-    with :ok <- send_message(conn, "run((#{goal}), #{timeout_s})"),
-         {:ok, reply} <- recv_message(conn) do
-      {:ok, parse(reply)}
-    end
-    |> case do
-      {:ok, {:error, e}} -> {:error, e}
-      {:ok, parsed} -> {:ok, parsed}
-      {:error, _} = err -> err
+    with :ok <- transport(send_message(conn, "run((#{goal}), #{timeout_s})")),
+         {:ok, reply} <- transport(recv_message(conn)) do
+      case parse(reply) do
+        {:error, prolog_error} -> {:error, prolog_error}
+        parsed -> {:ok, parsed}
+      end
     end
   end
+
+  defp transport({:error, reason}), do: {:error, {:transport, reason}}
+  defp transport(other), do: other
 
   @doc "Politely close the MQI connection and the socket."
   @spec close(t()) :: :ok
