@@ -252,7 +252,13 @@ Recently added:
   Unset by default. A prelude that fails to load (missing file, a directive that
   errors) fails that conversation's startup rather than silently running without it.
   It is infrastructure, not a conversation input: it never appears in `kb_snapshot`
-  and is not written to the conversation's log.
+  and is not written to the conversation's log. `priv/prelude.pl` ships one example:
+  the textbook "why" meta-interpreter (Sterling & Shapiro, *The Art of Prolog*) —
+  `solve/2`/`why/2`, which prove a goal the same way `clause/2` recursion always has,
+  but keep the derivation instead of discarding it, so `?- why(mortal(socrates), Proof)`
+  in question mode answers with *how*, not just *whether*. Point
+  `MANIFOLD_PRELUDE=priv/prelude.pl` at it to try it, or read the file's header for
+  the design.
 - **Automated test suite.** `test/` has three tiers — pure unit tests that need
   no sidecar (`test/manifold/`), integration tests that drive a real `swipl`
   (`test/integration/`, tagged `:swipl`), and one-shot smoke tests that verify
