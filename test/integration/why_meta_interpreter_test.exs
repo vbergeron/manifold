@@ -82,6 +82,91 @@ defmodule Manifold.Integration.WhyMetaInterpreterTest do
            } == binding
   end
 
+  test "why/2 tags the arm that actually fired in a disjunction", %{conv: conv} do
+    Conversation.assert(conv, [
+      "vegetarian(plato)",
+      "sentient(X) :- (human(X) ; vegetarian(X))"
+    ])
+
+    assert {:ok, {:bindings, [[binding]]}} = Conversation.query(conv, "why(sentient(plato), Proof)")
+
+    # `plato` only satisfies the right arm — the proof says `either(right, _)`, not the
+    # raw disjunction `call/1`-ed as one opaque step, and not the untried left arm either.
+    assert binding == %{
+             "functor" => "=",
+             "args" => [
+               "Proof",
+               %{
+                 "functor" => "rule",
+                 "args" => [
+                   %{"functor" => "sentient", "args" => ["plato"]},
+                   %{
+                     "functor" => "either",
+                     "args" => [
+                       "right",
+                       %{
+                         "functor" => "fact",
+                         "args" => [%{"functor" => "vegetarian", "args" => ["plato"]}]
+                       }
+                     ]
+                   }
+                 ]
+               }
+             ]
+           }
+  end
+
+  test "why/2 backtracks into both arms when both prove the goal", %{conv: conv} do
+    Conversation.assert(conv, [
+      "human(socrates)",
+      "vegetarian(socrates)",
+      "sentient(X) :- (human(X) ; vegetarian(X))"
+    ])
+
+    assert {:ok, {:bindings, solutions}} = Conversation.query(conv, "why(sentient(socrates), Proof)")
+
+    # One `either/2` per solution — a summary that mentioned both arms in one answer
+    # would be exactly the loss of resolution `either/2` exists to avoid.
+    proofs =
+      Enum.map(solutions, fn [%{"functor" => "=", "args" => ["Proof", proof]}] -> proof end)
+
+    assert Enum.sort(proofs) ==
+             Enum.sort([
+               %{
+                 "functor" => "rule",
+                 "args" => [
+                   %{"functor" => "sentient", "args" => ["socrates"]},
+                   %{
+                     "functor" => "either",
+                     "args" => [
+                       "left",
+                       %{
+                         "functor" => "fact",
+                         "args" => [%{"functor" => "human", "args" => ["socrates"]}]
+                       }
+                     ]
+                   }
+                 ]
+               },
+               %{
+                 "functor" => "rule",
+                 "args" => [
+                   %{"functor" => "sentient", "args" => ["socrates"]},
+                   %{
+                     "functor" => "either",
+                     "args" => [
+                       "right",
+                       %{
+                         "functor" => "fact",
+                         "args" => [%{"functor" => "vegetarian", "args" => ["socrates"]}]
+                       }
+                     ]
+                   }
+                 ]
+               }
+             ])
+  end
+
   test "why/2 fails, rather than errors, on a goal that does not hold", %{conv: conv} do
     Conversation.assert(conv, ["human(socrates)"])
 
