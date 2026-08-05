@@ -60,6 +60,12 @@ Every frame, both directions:
 `answer` ∈ `true` | `false` | `{"bindings": [...]}`. `query` and `contradiction`
 are the special messages, rendered distinctly.
 
+A `query` whose goal hands back a `why/2`-shaped proof term (`priv/prelude.pl`)
+carries one more field, `audit`: a list of that proof rendered as a tree
+(one entry per solution), e.g. `"mortal(socrates)  [rule]\n└─ human(socrates)  [fact]"`.
+Absent on every other query — additive, so a client that doesn't know it yet
+still renders `goal`/`answer` exactly as before.
+
 ## Server → Client events
 
 | type | payload | effect |

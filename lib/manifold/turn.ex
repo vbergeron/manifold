@@ -28,12 +28,19 @@ defmodule Manifold.Turn do
   `respond` gets to react to the answer. It exists for exactly what the gate
   and extractor cannot promise: guaranteed syntax, and a query that runs
   immediately instead of waiting on a generation to decide it should.
+
+  Every goal this module runs — question mode's or one the model generated in
+  the `query` phase — passes its result through `Manifold.Prolog.AuditTree`
+  before building the `query` message's fields. A `why/2`-shaped proof term
+  (see `priv/prelude.pl`) picks up an extra `:audit` field, rendered as a tree,
+  instead of being left to flatten into an opaque Prolog term inside `answer`
+  alongside every other query.
   """
   require Logger
 
   alias Manifold.{Clause, Conversation, Event, Gate, Grammar, Prompt}
   alias Manifold.Llama.Client
-  alias Manifold.Prolog.Answer
+  alias Manifold.Prolog.{Answer, AuditTree}
 
   @extract_opts [n_predict: 200, temperature: 0.2]
   @goals_opts [n_predict: 120, temperature: 0.1]
@@ -100,7 +107,7 @@ defmodule Manifold.Turn do
       goal ->
         case Conversation.query(conv, goal, @query_timeout_s) do
           {:ok, result} ->
-            fields = %{goal: goal, answer: Answer.encode(result)}
+            fields = fields(goal, result)
             Event.emit(subscriber, :message, turn, Conversation.add_message(conv, turn, :query, fields))
             %{clauses: [], violations: [], answers: [fields], unanswered: []}
 
@@ -240,7 +247,7 @@ defmodule Manifold.Turn do
       [] ->
         case Conversation.query(conv, goal, @query_timeout_s) do
           {:ok, result} ->
-            fields = %{goal: goal, answer: Answer.encode(result)}
+            fields = fields(goal, result)
             Event.emit(subscriber, :message, turn, Conversation.add_message(conv, turn, :query, fields))
             {:answer, fields}
 
@@ -288,6 +295,26 @@ defmodule Manifold.Turn do
   end
 
   # --- helpers ---------------------------------------------------------------
+
+  # A query's answer is, in the common case, `true`/`false`/plain bindings —
+  # `Answer.encode/1` already handles those and that is the whole `query`
+  # message. But a goal can also hand back a `why/2`-shaped proof term (see the
+  # prelude), and that is a derivation, not a value: flattened into `answer`
+  # alone it would read as one more opaque Prolog term, exactly as
+  # `test/integration/why_meta_interpreter_test.exs` shows it comes back.
+  # `AuditTree` catches that shape and renders it as a tree; when it finds one,
+  # `:audit` joins the message as an extra field — additive, so a client that
+  # doesn't know it yet still renders `goal`/`answer` exactly as before. Both
+  # routes a goal reaches this point through — a user's own `?- why(...)` in
+  # question mode (`answer_question/4`, above) and a goal the model generated
+  # itself (`run_goal/5`) — build their `fields` through this one function, so
+  # neither has to know which produced the proof.
+  defp fields(goal, result) do
+    case AuditTree.audit(result) do
+      [] -> %{goal: goal, answer: Answer.encode(result)}
+      trees -> %{goal: goal, answer: Answer.encode(result), audit: trees}
+    end
+  end
 
   defp generate(prompt, opts, turn, subscriber) do
     case Client.completion(prompt, Keyword.put(opts, :grammar, Grammar.prolog())) do
