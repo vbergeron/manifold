@@ -22,3 +22,6 @@ config :manifold,
   conversation_idle_ms: 900_000
 
 config :logger, level: :info
+
+# Per-environment overrides. Without this the whole of `config/test.exs` would be ignored.
+import_config "#{config_env()}.exs"
