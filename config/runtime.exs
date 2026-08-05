@@ -29,6 +29,13 @@ if config_env() != :test do
     config :manifold, web_port: String.to_integer(port)
   end
 
+  # A Prolog file `consult/1`ed into every conversation's engine at boot, ahead of
+  # replay — the natural place for background rules and facts that should not have to
+  # be re-asserted (or re-taught to the model) in every conversation. Unset by default.
+  if prelude = System.get_env("MANIFOLD_PRELUDE") do
+    config :manifold, prelude_path: prelude
+  end
+
   # Conversation persistence. `MANIFOLD_DATA_DIR=off` disables it (every conversation
   # becomes ephemeral); anything else is the directory the append-only logs live in.
   # See `Manifold.Store` for the adapter contract.

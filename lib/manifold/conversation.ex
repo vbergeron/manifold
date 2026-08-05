@@ -15,6 +15,11 @@ defmodule Manifold.Conversation do
   Because the server owns all of it, a reconnecting client needs no replay
   buffer — it re-`open`s and takes both snapshots.
 
+  If `:prelude_path` is configured (`MANIFOLD_PRELUDE`), that file is `consult/1`ed into
+  every engine at startup, before replay and before anything else can touch it — see
+  `consult_prelude/1`. It is background knowledge shared by every conversation, not a
+  conversation input: it is not part of `kb_snapshot/1` and is not written to the log.
+
   `run_turn/4` executes the sealed turn loop. The loop itself runs in a *separate,
   monitored process* (`Manifold.Turn`), for two reasons: this GenServer stays
   responsive to `kb_request` and `cancel_turn` while the model generates, and a
@@ -203,6 +208,11 @@ defmodule Manifold.Conversation do
          {:ok, engine} <- Engine.await_ready(engine),
          {:ok, conn} <- Engine.connect(engine),
          {:ok, engine} <- Engine.identify(engine, conn),
+         # Ahead of the `unknown` flag below, and ahead of replay: a directive in the
+         # prelude that calls something undefined should throw, not silently fail, and
+         # anything the prelude defines must already be there for the first replayed
+         # clause or live turn to see.
+         :ok <- consult_prelude(conn),
          # Integrity constraints mention predicates that may not exist yet; without this
          # an undefined predicate throws existence_error instead of failing, and every
          # check would look like an error rather than "no violation". Per engine.
@@ -496,6 +506,38 @@ defmodule Manifold.Conversation do
     |> div(4)
     |> min(@idle_check_cap_ms)
     |> max(@idle_check_floor_ms)
+  end
+
+  # `consult/1` a background Prolog file into a freshly connected engine, or do nothing
+  # when none is configured (the default). A misconfigured prelude — missing file, a
+  # syntax error, a failing directive — fails engine startup the same way a missing
+  # `swipl` does: surfacing as `error{prolog_unavailable}` beats booting a conversation
+  # silently short of the rules it was told to have.
+  #
+  # `consult/1` is fine to run over MQI here even though it is a foreign predicate that
+  # touches the filesystem: unlike `assertz/1` in the rest of this module, there is no
+  # per-clause id or `kind` to mint, and the file is not a conversation input — it is
+  # infrastructure, identical for every conversation, so it does not belong in the KB
+  # snapshot or the durable log. It is not re-consulted on rehydrate for the same reason
+  # `rehydrate/1` never re-runs `persist/2`: a fresh engine already has it, from here.
+  defp consult_prelude(conn) do
+    case Application.get_env(:manifold, :prelude_path) do
+      nil ->
+        :ok
+
+      path ->
+        case MQI.run(conn, "consult('#{quote_atom(path)}')") do
+          {:ok, _} -> :ok
+          {:error, reason} -> {:error, {:prelude_failed, path, reason}}
+        end
+    end
+  end
+
+  # Escape a path for interpolation into a Prolog quoted atom: double any embedded `'`
+  # (SWI's own escape for it) and neutralise `\`, which quoted-atom syntax treats as the
+  # start of an escape sequence.
+  defp quote_atom(text) do
+    text |> String.replace("\\", "\\\\") |> String.replace("'", "\\'")
   end
 
   # A plain assert. Privacy comes from the engine being this conversation's own OS
