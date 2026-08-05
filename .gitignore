@@ -16,3 +16,6 @@ manifold-*.tar
 /data/
 # Transient scratch dir from the Claude Code harness.
 /.claude/.cc-writes/
+# macOS metadata
+.DS_Store
+**/.DS_Store

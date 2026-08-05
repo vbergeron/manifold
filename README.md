@@ -226,13 +226,14 @@ and reuses existing KB predicates to avoid vocabulary drift. Known weak spot:
 complex restrictive quantifiers ("every X who P did Q") are model-inconsistent
 at 3B.
 
-Not yet built:
+Recently added:
 
-- **KB persistence to disk per conversation.** `Manifold.Conversation` holds the
-  KB and transcript in memory only, and is `restart: :transient` — a crash or a
-  BEAM restart loses both, and a reconnecting `open {conversation_id}` then finds
-  a fresh, empty conversation under that id.
-- **An automated test suite.** There is no `test/` tree yet; verification is the
-  scripts above, which need a live `swipl` and (for the LLM phases) a model. The
-  pure parts — `Clause`, `Prolog.MQI` framing, `Prolog.Answer`, `Event` — are
-  unit-testable without either sidecar.
+- **KB persistence per conversation.** `Manifold.Store.Log` is a pluggable
+  append-only ETF log adapter; conversations rehydrate from it on reconnect.
+  `Manifold.Store.None` (the default in tests) keeps runs hermetic. Pointed at a
+  directory via `MANIFOLD_DATA_DIR`.
+- **Automated test suite.** `test/` has three tiers — pure unit tests that need
+  no sidecar (`test/manifold/`), integration tests that drive a real `swipl`
+  (`test/integration/`, tagged `:swipl`), and one-shot smoke tests that verify
+  OS-level assumptions (`test/smoke/`, excluded from `mix test` by default). Run
+  with `mix test`; see `CLAUDE.md` for the full rationale.
