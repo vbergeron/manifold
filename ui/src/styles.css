@@ -732,6 +732,22 @@ button {
   border-bottom-left-radius: var(--r-sm);
 }
 
+/* A user message sent as a raw Prolog query — same bubble, plus the `?`
+   highlighted inline so it reads as "talking to Prolog" at a glance. */
+.bubble--question {
+  box-shadow:
+    0 0 0 2px var(--constraint),
+    var(--shadow-sm);
+}
+
+.qmark {
+  background: var(--constraint-soft);
+  color: var(--constraint);
+  font-weight: 700;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+
 .bubble__who {
   display: block;
   font-size: 10.5px;
@@ -995,8 +1011,13 @@ button {
   padding: 12px 20px 14px;
 }
 
-.composer__input {
+.composer__field {
   grid-area: input;
+  position: relative;
+}
+
+.composer__input {
+  width: 100%;
   font: inherit;
   color: var(--text);
   background: var(--bg-sunken);
@@ -1017,6 +1038,27 @@ button {
 
 .composer__input:disabled {
   opacity: 0.6;
+}
+
+/* Question mode: the composer itself is highlighted the same way a sent
+   question-mode bubble is, so the cue appears before the message is even
+   sent. `?` echoes in a badge rather than inside the textarea, which cannot
+   style one of its own characters. */
+.composer__field--question .composer__input {
+  border-color: var(--constraint);
+  padding-left: 30px;
+}
+
+.composer__field--question .composer__input:focus {
+  box-shadow: 0 0 0 3px var(--constraint-soft);
+}
+
+.composer__qmark {
+  position: absolute;
+  top: 9px;
+  left: 10px;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .composer__actions {

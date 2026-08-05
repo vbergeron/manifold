@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isQuestionMode } from "../protocol/types";
 
 interface Props {
   connected: boolean;
@@ -22,6 +23,7 @@ export function Composer({ connected, turnActive, onSend, onCancel }: Props) {
   }, [text]);
 
   const canSend = connected && !turnActive && text.trim().length > 0;
+  const questionMode = isQuestionMode(text);
 
   function submit() {
     if (!canSend) return;
@@ -36,25 +38,32 @@ export function Composer({ connected, turnActive, onSend, onCancel }: Props) {
         submit();
       }}
     >
-      <textarea
-        ref={areaRef}
-        className="composer__input"
-        rows={1}
-        value={text}
-        placeholder={
-          connected
-            ? "State a fact, a rule, or ask a question…"
-            : "Waiting for the server…"
-        }
-        disabled={!connected}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            submit();
+      <div className={`composer__field${questionMode ? " composer__field--question" : ""}`}>
+        {questionMode && (
+          <mark className="composer__qmark" aria-hidden="true">
+            ?
+          </mark>
+        )}
+        <textarea
+          ref={areaRef}
+          className="composer__input"
+          rows={1}
+          value={text}
+          placeholder={
+            connected
+              ? "State a fact, a rule, or ask a question… (start with ? for a raw Prolog query)"
+              : "Waiting for the server…"
           }
-        }}
-      />
+          disabled={!connected}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              submit();
+            }
+          }}
+        />
+      </div>
       <div className="composer__actions">
         {turnActive && (
           <button type="button" className="btn btn--danger" onClick={onCancel}>
@@ -67,6 +76,7 @@ export function Composer({ connected, turnActive, onSend, onCancel }: Props) {
       </div>
       <p className="composer__hint">
         Enter to send · Shift+Enter for a newline
+        {questionMode && " · sent straight to Prolog as a query"}
         {turnActive && " · a turn is in flight"}
       </p>
     </form>

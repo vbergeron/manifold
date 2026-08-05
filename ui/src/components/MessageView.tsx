@@ -1,4 +1,8 @@
-import { answerIsBindings, type TranscriptMessage } from "../protocol/types";
+import {
+  answerIsBindings,
+  isQuestionMode,
+  type TranscriptMessage,
+} from "../protocol/types";
 import { stringifyValue, type MessageView as MessageViewModel } from "../state/store";
 
 export function MessageItem({ view }: { view: MessageViewModel }) {
@@ -21,18 +25,39 @@ function Bubble({
   message: Extract<TranscriptMessage, { kind: "user" | "assistant" }>;
   streaming: boolean;
 }) {
+  const question = message.kind === "user" && isQuestionMode(message.text);
+
   return (
     <div className={`row row--${message.kind}`}>
-      <div className={`bubble bubble--${message.kind}`}>
+      <div className={`bubble bubble--${message.kind}${question ? " bubble--question" : ""}`}>
         <span className="bubble__who">
           {message.kind === "user" ? "You" : "Manifold"}
         </span>
         <p className="bubble__text">
-          {message.text}
+          {question ? <QuestionText text={message.text} /> : message.text}
           {streaming && <span className="caret" aria-hidden="true" />}
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * A question-mode message with its opening `?` (and an optional `-`, so
+ * `?- goal.` highlights the same way `? goal.` does) picked out — the visual
+ * cue that this text went straight to Prolog rather than through the model.
+ */
+function QuestionText({ text }: { text: string }) {
+  const match = /^(\s*)(\?+-?)([\s\S]*)$/.exec(text);
+  if (!match) return <>{text}</>;
+  const [, lead, marker, rest] = match;
+
+  return (
+    <>
+      {lead}
+      <mark className="qmark">{marker}</mark>
+      {rest}
+    </>
   );
 }
 
