@@ -60,20 +60,23 @@ defmodule Manifold.Prolog.AuditTree do
   child at each level.
   """
   @spec render(term()) :: String.t()
-  def render(proof), do: proof |> node() |> format() |> Enum.join("\n")
+  def render(proof), do: proof |> proof_node() |> format() |> Enum.join("\n")
 
   # --- proof term -> {label, tag, children} -----------------------------------
+  # Named `proof_node`, not `node` — the latter is `Kernel.node/1` (the BIF
+  # naming the local Erlang node), auto-imported into every module.
 
-  defp node(%{"functor" => "fact", "args" => [goal]}), do: {source(goal), "fact", []}
-  defp node(%{"functor" => "builtin", "args" => [goal]}), do: {source(goal), "builtin", []}
+  defp proof_node(%{"functor" => "fact", "args" => [goal]}), do: {source(goal), "fact", []}
+  defp proof_node(%{"functor" => "builtin", "args" => [goal]}), do: {source(goal), "builtin", []}
 
-  defp node(%{"functor" => "either", "args" => [side, arm]}),
-    do: {"either (#{side})", :either, [node(arm)]}
+  defp proof_node(%{"functor" => "either", "args" => [side, arm]}),
+    do: {"either (#{side})", :either, [proof_node(arm)]}
 
-  defp node(%{"functor" => "rule", "args" => [goal, body]}), do: {source(goal), "rule", body_nodes(body)}
+  defp proof_node(%{"functor" => "rule", "args" => [goal, body]}),
+    do: {source(goal), "rule", body_nodes(body)}
 
-  defp body_nodes(body) when is_list(body), do: Enum.map(body, &node/1)
-  defp body_nodes(body), do: [node(body)]
+  defp body_nodes(body) when is_list(body), do: Enum.map(body, &proof_node/1)
+  defp body_nodes(body), do: [proof_node(body)]
 
   # --- {label, tag, children} -> lines -----------------------------------------
 
