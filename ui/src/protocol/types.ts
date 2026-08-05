@@ -256,3 +256,12 @@ export function answerIsBindings(
 ): answer is { bindings: Binding[] } {
   return typeof answer === "object" && answer !== null && "bindings" in answer;
 }
+
+/**
+ * True when `text` opens **question mode**: sent straight to Prolog as a raw
+ * goal instead of to the model. Mirrors `Manifold.Clause.question?/1` — kept
+ * in lockstep with it since both sides must agree on what counts as one.
+ */
+export function isQuestionMode(text: string): boolean {
+  return text.trimStart().startsWith("?");
+}

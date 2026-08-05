@@ -139,4 +139,34 @@ defmodule Manifold.ClauseTest do
       assert Clause.body("  human(socrates).  ") == "human(socrates)"
     end
   end
+
+  describe "question?/1" do
+    test "true when the first non-whitespace character is ?" do
+      assert Clause.question?("? mortal(socrates).")
+      assert Clause.question?("?- mortal(socrates).")
+      assert Clause.question?("  ?mortal(socrates)")
+    end
+
+    test "false for an ordinary sentence, even one asking a question" do
+      refute Clause.question?("Is Socrates mortal?")
+      refute Clause.question?("mortal(socrates).")
+    end
+  end
+
+  describe "question_goal/1" do
+    test "strips the leading ?, an optional -, and the trailing period" do
+      assert Clause.question_goal("? mortal(socrates).") == "mortal(socrates)"
+      assert Clause.question_goal("?- mortal(socrates).") == "mortal(socrates)"
+      assert Clause.question_goal("?mortal(socrates).") == "mortal(socrates)"
+    end
+
+    test "leaves a goal with no trailing period alone" do
+      assert Clause.question_goal("? mortal(socrates)") == "mortal(socrates)"
+    end
+
+    test "a bare ? yields an empty goal, not garbage" do
+      assert Clause.question_goal("?") == ""
+      assert Clause.question_goal("?-") == ""
+    end
+  end
 end

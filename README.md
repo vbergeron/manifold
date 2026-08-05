@@ -212,6 +212,15 @@ Rules that make this correct:
 This spec is implemented by `Manifold.Turn` (driven via
 `Manifold.Conversation.run_turn/4`), which emits each phase as a protocol event.
 
+**Question mode** bypasses the whole loop above. A message whose first
+non-whitespace character is `?` (`Manifold.Clause.question?/1`) is not
+gated, extracted, or asserted — the rest of the text is run **verbatim** as
+a Prolog goal against the KB (`?- ` is accepted too, mirroring `swipl`'s own
+prompt). The answer becomes the evidence block, so `[RESPOND]` still gets to
+react to it in prose; only the model-driven routing in between is skipped.
+It exists for the case the gate can't promise: a query whose syntax and
+timing you control directly, rather than one an LLM decided to run.
+
 ## Status / next steps
 
 Working end to end: supervision of both sidecars, no-orphan shutdown, MQI
@@ -228,6 +237,10 @@ at 3B.
 
 Recently added:
 
+- **Question mode.** A message starting with `?` (or `?-`) is run verbatim as a
+  Prolog goal — no gate, extraction or assertion — and the answer is fed back
+  to `respond` so the model can react to it. See "The turn loop" above and
+  `docs/PROTOCOL.md#question-mode`.
 - **KB persistence per conversation.** `Manifold.Store.Log` is a pluggable
   append-only ETF log adapter; conversations rehydrate from it on reconnect.
   `Manifold.Store.None` (the default in tests) keeps runs hermetic. Pointed at a

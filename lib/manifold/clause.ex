@@ -44,6 +44,30 @@ defmodule Manifold.Clause do
   def body(text), do: text |> String.trim() |> String.trim_trailing(".") |> String.trim()
 
   @doc """
+  Whether `text` opens **question mode** — the user talking straight to Prolog
+  instead of to the model. True when the first non-whitespace character is `?`.
+  """
+  @spec question?(String.t()) :: boolean()
+  def question?(text), do: text |> String.trim() |> String.starts_with?("?")
+
+  @doc """
+  The goal a question-mode message asks: `text` with its leading `?` — and an
+  optional following `-`, so the conventional `?- goal.` reads the same as
+  `? goal.` — and its trailing period stripped, ready for `MQI.run/3`.
+
+  Only meaningful once `question?/1` has confirmed the message opens with `?`;
+  called after that check rather than folding it in, so a plain sentence is
+  never silently run as a goal.
+  """
+  @spec question_goal(String.t()) :: String.t()
+  def question_goal(text) do
+    text
+    |> String.trim()
+    |> String.replace(~r/^\?+\s*-?\s*/, "")
+    |> body()
+  end
+
+  @doc """
   Classify a clause. A headless `:- Body` is an integrity constraint (manifold's
   representation of negation), `Head :- Body` a rule, anything else a fact.
   """

@@ -20,6 +20,14 @@ defmodule Manifold.Turn do
        before assertion ran, so it cannot foresee a violated constraint. If one
        fires we skip the query and steer `respond` at the conflict instead of
        re-gating.
+
+  A fourth path sits outside that loop entirely: **question mode**
+  (`Clause.question?/1`), a message whose first non-whitespace character is
+  `?`. Gate, extract and check all vanish — the rest of the text is a raw
+  Prolog goal, run verbatim against the KB, no model in the loop until
+  `respond` gets to react to the answer. It exists for exactly what the gate
+  and extractor cannot promise: guaranteed syntax, and a query that runs
+  immediately instead of waiting on a generation to decide it should.
   """
   require Logger
 
@@ -52,12 +60,65 @@ defmodule Manifold.Turn do
 
   Failures interleave as `error` events and never abort the turn: the loop always
   reaches `respond` and always closes with `turn_done`.
+
+  In question mode (`Clause.question?/1`) the shape collapses to:
+
+      turn_started · message{user}
+      turn_phase{query} · message{query}
+      turn_phase{respond} · assistant_token* · assistant_message
+      turn_done
   """
   @spec run(pid(), String.t(), String.t(), pid() | nil) :: :ok
   def run(conv, turn, text, subscriber) do
     Event.emit(subscriber, :turn_started, turn, %{})
     Event.emit(subscriber, :message, turn, Conversation.add_message(conv, turn, :user, %{text: text}))
 
+    evidence =
+      if Clause.question?(text),
+        do: answer_question(conv, turn, text, subscriber),
+        else: converse(conv, turn, text, subscriber)
+
+    respond(conv, turn, text, evidence, subscriber)
+    Event.emit(subscriber, :turn_done, turn, %{})
+    :ok
+  end
+
+  # --- phases ----------------------------------------------------------------
+
+  # Question mode: no gate, no extraction, no assertion. `text` minus its `?`
+  # is run as a goal exactly as the user wrote it, and the answer becomes the
+  # only evidence `respond` sees — which is what lets the model comment on a
+  # result the user asked for directly instead of one it derived itself.
+  defp answer_question(conv, turn, text, subscriber) do
+    Event.emit(subscriber, :turn_phase, turn, %{phase: "query"})
+
+    case Clause.question_goal(text) do
+      "" ->
+        Event.error(subscriber, turn, "bad_message", "empty Prolog query")
+        %{clauses: [], violations: [], answers: [], unanswered: [%{goal: nil, missing: []}]}
+
+      goal ->
+        case Conversation.query(conv, goal, @query_timeout_s) do
+          {:ok, result} ->
+            fields = %{goal: goal, answer: Answer.encode(result)}
+            Event.emit(subscriber, :message, turn, Conversation.add_message(conv, turn, :query, fields))
+            %{clauses: [], violations: [], answers: [fields], unanswered: []}
+
+          {:error, "time_limit_exceeded"} ->
+            Event.error(subscriber, turn, "prolog_timeout", "#{goal} exceeded #{@query_timeout_s}s")
+            %{clauses: [], violations: [], answers: [], unanswered: [%{goal: goal, missing: []}]}
+
+          {:error, reason} ->
+            Event.error(subscriber, turn, "internal", "prolog error on #{goal}: #{inspect(reason)}")
+            %{clauses: [], violations: [], answers: [], unanswered: [%{goal: goal, missing: []}]}
+        end
+    end
+  end
+
+  # The sealed loop: gate → extract → assert → check → query, folded into the
+  # evidence block `respond` reacts to. Everything this module did before
+  # question mode existed.
+  defp converse(conv, turn, text, subscriber) do
     gate = gate(turn, text, subscriber)
     added = if gate.new_facts, do: extract(conv, turn, gate.statements, subscriber), else: []
     violations = if added != [], do: check(conv, turn, added, subscriber), else: []
@@ -67,19 +128,13 @@ defmodule Manifold.Turn do
         do: query(conv, turn, gate.questions, subscriber),
         else: {[], []}
 
-    evidence = %{
+    %{
       clauses: Enum.map(added, & &1.text),
       violations: violations,
       answers: answers,
       unanswered: unanswered
     }
-
-    respond(conv, turn, text, evidence, subscriber)
-    Event.emit(subscriber, :turn_done, turn, %{})
-    :ok
   end
-
-  # --- phases ----------------------------------------------------------------
 
   defp gate(turn, text, subscriber) do
     Event.emit(subscriber, :turn_phase, turn, %{phase: "gate"})

@@ -122,6 +122,30 @@ Contradiction path (per the sealed override rule): a `check` phase that fails
 emits a `message {kind:contradiction, …}` *and* steers the `respond` phase to
 explain it.
 
+## Question mode
+
+A `user_message` whose text starts with `?` (after leading whitespace) is not
+gated, extracted, or asserted — the rest of the text is run verbatim as a
+Prolog goal against the KB (`?- goal.` is accepted too). The event sequence
+collapses to:
+
+```
+C→S user_message      {turn:t9, text:"? mortal(socrates)"}
+S→C turn_started      {t9}
+S→C message           {t9, m40, kind:user, text:"? mortal(socrates)"}
+S→C turn_phase        {t9, query}   · message {t9, m41, kind:query, goal:"mortal(socrates)", answer:true}
+S→C turn_phase        {t9, respond} · assistant_token {m42,"Yes"} …
+S→C assistant_message {t9, m42, text:"Yes — that follows from what you've told me.", done:true}
+S→C turn_done         {t9}
+```
+
+No new frame types: the client tells question mode apart from a gated turn
+purely from the `user` message's text starting with `?`, same as the server
+does. The `query` message it produces is identical in shape to one the gated
+loop emits — only how it got there differs. An empty query (just `?`, or all
+punctuation) never reaches Prolog; it surfaces as `error {bad_message}` and an
+`unanswered` evidence line, same as a goal the KB has no predicates for.
+
 ## Reconnect
 
 The server owns all state (in the `Conversation` process). On reconnect the
