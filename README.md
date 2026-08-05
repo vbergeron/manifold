@@ -235,6 +235,13 @@ and reuses existing KB predicates to avoid vocabulary drift. Known weak spot:
 complex restrictive quantifiers ("every X who P did Q") are model-inconsistent
 at 3B.
 
+The query phase is currently **one pass**: one generation yields up to three
+goals, run once, blind to each other's results — which rules out multi-hop
+questions (an answer's binding cannot yet feed the next goal) and adaptive
+stopping. `docs/design/multi-pass-query.md` proposes a bounded reason → act →
+observe loop to replace it, without touching the sealed loop's ordering
+rules or the wire protocol.
+
 Recently added:
 
 - **Question mode.** A message starting with `?` (or `?-`) is run verbatim as a
