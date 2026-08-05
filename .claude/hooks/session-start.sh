@@ -19,6 +19,12 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
 
+# Async: the session starts immediately while this installs in the background. A tool
+# call that runs before this finishes (elixir/mix/swipl, or anything under
+# CLAUDE_PROJECT_DIR that needs deps compiled) will fail until it completes — see
+# asyncTimeout below for the outside bound on how long that window can be.
+echo '{"async": true, "asyncTimeout": 300000}'
+
 ELIXIR_VERSION=1.18.4
 OTP_SERIES=25 # matches Ubuntu 24.04's `apt install erlang` (25.3.x); see note below.
 ELIXIR_HOME=/opt/elixir
