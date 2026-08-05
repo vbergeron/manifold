@@ -31,9 +31,10 @@ defmodule Manifold.Turn do
 
   Every goal this module runs — question mode's or one the model generated in
   the `query` phase — passes its result through `Manifold.Prolog.AuditTree`
-  first. A `why/2`-shaped proof term (see `priv/prelude.pl`) is logged as an
-  audit tree instead of being left to flatten into an opaque Prolog term
-  alongside every other answer.
+  before building the `query` message's fields. A `why/2`-shaped proof term
+  (see `priv/prelude.pl`) picks up an extra `:audit` field, rendered as a tree,
+  instead of being left to flatten into an opaque Prolog term inside `answer`
+  alongside every other query.
   """
   require Logger
 
@@ -106,9 +107,8 @@ defmodule Manifold.Turn do
       goal ->
         case Conversation.query(conv, goal, @query_timeout_s) do
           {:ok, result} ->
-            fields = %{goal: goal, answer: Answer.encode(result)}
+            fields = fields(goal, result)
             Event.emit(subscriber, :message, turn, Conversation.add_message(conv, turn, :query, fields))
-            audit(turn, goal, result)
             %{clauses: [], violations: [], answers: [fields], unanswered: []}
 
           {:error, "time_limit_exceeded"} ->
@@ -247,9 +247,8 @@ defmodule Manifold.Turn do
       [] ->
         case Conversation.query(conv, goal, @query_timeout_s) do
           {:ok, result} ->
-            fields = %{goal: goal, answer: Answer.encode(result)}
+            fields = fields(goal, result)
             Event.emit(subscriber, :message, turn, Conversation.add_message(conv, turn, :query, fields))
-            audit(turn, goal, result)
             {:answer, fields}
 
           {:error, "time_limit_exceeded"} ->
@@ -298,22 +297,23 @@ defmodule Manifold.Turn do
   # --- helpers ---------------------------------------------------------------
 
   # A query's answer is, in the common case, `true`/`false`/plain bindings —
-  # `Answer.encode/1` already handles those and that is the end of it. But a
-  # goal can also hand back a `why/2`-shaped proof term (see the prelude), and
-  # that is a derivation, not a value: flattened into the same `answer` field
-  # it would read as one more opaque Prolog term, exactly as
-  # `test/integration/why_meta_interpreter_test.exs` shows it comes back. Catch
-  # that shape here and log it as an audit tree instead — the "how", not just
-  # the "whether" — for both routes a goal can reach this point: a user's own
-  # `?- why(...)` in question mode (`answer_question/4`, above) and a goal the
-  # model generated itself (`run_goal/5`). Neither path knows or cares which
-  # produced it; both hand this the same `Conversation.query/3` result.
-  defp audit(turn, goal, result) do
-    for tree <- AuditTree.audit(result) do
-      Logger.info(["[turn] ", turn, ": audit — ", goal, "\n", tree])
+  # `Answer.encode/1` already handles those and that is the whole `query`
+  # message. But a goal can also hand back a `why/2`-shaped proof term (see the
+  # prelude), and that is a derivation, not a value: flattened into `answer`
+  # alone it would read as one more opaque Prolog term, exactly as
+  # `test/integration/why_meta_interpreter_test.exs` shows it comes back.
+  # `AuditTree` catches that shape and renders it as a tree; when it finds one,
+  # `:audit` joins the message as an extra field — additive, so a client that
+  # doesn't know it yet still renders `goal`/`answer` exactly as before. Both
+  # routes a goal reaches this point through — a user's own `?- why(...)` in
+  # question mode (`answer_question/4`, above) and a goal the model generated
+  # itself (`run_goal/5`) — build their `fields` through this one function, so
+  # neither has to know which produced the proof.
+  defp fields(goal, result) do
+    case AuditTree.audit(result) do
+      [] -> %{goal: goal, answer: Answer.encode(result)}
+      trees -> %{goal: goal, answer: Answer.encode(result), audit: trees}
     end
-
-    :ok
   end
 
   defp generate(prompt, opts, turn, subscriber) do
