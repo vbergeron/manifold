@@ -245,6 +245,14 @@ Recently added:
   append-only ETF log adapter; conversations rehydrate from it on reconnect.
   `Manifold.Store.None` (the default in tests) keeps runs hermetic. Pointed at a
   directory via `MANIFOLD_DATA_DIR`.
+- **Prelude file.** Point `MANIFOLD_PRELUDE` at a `.pl` file and it is `consult/1`ed
+  into every conversation's own engine at startup, before replay — background rules
+  and facts (e.g. `mortal(X) :- human(X).`) available from the first turn, without
+  re-asserting them by hand or re-teaching them to the model in every conversation.
+  Unset by default. A prelude that fails to load (missing file, a directive that
+  errors) fails that conversation's startup rather than silently running without it.
+  It is infrastructure, not a conversation input: it never appears in `kb_snapshot`
+  and is not written to the conversation's log.
 - **Automated test suite.** `test/` has three tiers — pure unit tests that need
   no sidecar (`test/manifold/`), integration tests that drive a real `swipl`
   (`test/integration/`, tagged `:swipl`), and one-shot smoke tests that verify

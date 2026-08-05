@@ -19,7 +19,12 @@ config :manifold,
   max_conversations: 64,
   # Idle conversations are evicted and rehydrated from their log on next open. Must stay
   # well above the socket's own 95 s idle deadline so socket churn never evicts.
-  conversation_idle_ms: 900_000
+  conversation_idle_ms: 900_000,
+  # `nil` disables it. A path here is `consult/1`ed into every conversation's engine —
+  # once per engine, since each one is a fresh swipl — before anything else touches it,
+  # so predicates and rules it defines are available from the first assert or query. See
+  # `Manifold.Conversation.init/1`.
+  prelude_path: nil
 
 config :logger, level: :info
 
