@@ -1,3 +1,12 @@
+:- encoding(utf8).
+% The directive above has to be the very first thing in the file, ahead of even
+% this comment: `consult/1` picks an encoding from the OS locale until it sees
+% one, and a prelude consulted into an engine started under a non-UTF-8 locale
+% (`LC_CTYPE=POSIX`, seen in this very sandbox) would otherwise misread the em
+% dashes and curly quotes below as "Illegal multibyte Sequence" -- a warning
+% today, since it only corrupts comments, but not something to leave
+% load-bearing on the deployment's locale.
+
 % ---------------------------------------------------------------------------
 % The "why" meta-interpreter (Sterling & Shapiro, *The Art of Prolog*).
 %
@@ -23,6 +32,17 @@
 %                        just called, not looked up, because `clause/2` only
 %                        sees predicates defined by clauses and raises a
 %                        `permission_error` on anything else.
+%
+% A conjunction's proof (ProofB above, when the body has more than one goal) is
+% a **flat list** of its conjuncts' proofs — `[fact(price(widget,150)),
+% builtin(150>100)]` — not the nested `(P1, (P2, P3))` shape `,`/2 itself
+% builds. `,`/2 is right-associative and arbitrary-length, so a proof shaped
+% the same way would make a three-goal body indistinguishable in structure
+% from "two goals, the second of which is itself two goals" — a distinction
+% about how the *source text* happened to associate, not about the proof.
+% `conj_list/2` walks that chain once and flattens it; a single-goal body
+% stays a bare proof term rather than a one-element list, since it was never
+% a conjunction to begin with.
 %
 % `why/2` is the entry point: `why(Goal, Proof)` is `solve/2` under the name a
 % caller actually wants to ask for — e.g. `?- why(mortal(socrates), Proof)` in
@@ -59,9 +79,15 @@
 % ---------------------------------------------------------------------------
 
 solve(true, true) :- !.
-solve((A, B), (ProofA, ProofB)) :- !, solve(A, ProofA), solve(B, ProofB).
+solve((A, B), [ProofA | ProofBs]) :- !, solve(A, ProofA), conj_list(B, ProofBs).
 solve(Goal, builtin(Goal)) :- predicate_property(Goal, built_in), !, call(Goal).
 solve(Goal, fact(Goal)) :- clause(Goal, true), !.
 solve(Goal, rule(Goal, ProofBody)) :- clause(Goal, Body), solve(Body, ProofBody).
+
+% Flatten a right-nested `,`/2 chain into a list of proofs, one per conjunct,
+% instead of recursing through `solve/2`'s own conjunction clause again (which
+% would nest one list inside another per extra conjunct rather than flatten).
+conj_list((A, B), [ProofA | ProofBs]) :- !, solve(A, ProofA), conj_list(B, ProofBs).
+conj_list(Goal, [Proof]) :- solve(Goal, Proof).
 
 why(Goal, Proof) :- solve(Goal, Proof).

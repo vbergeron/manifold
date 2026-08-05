@@ -50,11 +50,16 @@ defmodule Manifold.Integration.WhyMetaInterpreterTest do
            }
   end
 
-  test "why/2 calls a built-in as one opaque step instead of erroring on it", %{conv: conv} do
-    Conversation.assert(conv, ["price(widget, 150)", "discount(X) :- price(X, P), P > 100"])
+  test "why/2 aggregates a conjunction's proof into a flat list, not nested tuples", %{conv: conv} do
+    Conversation.assert(conv, [
+      "price(widget, 150)",
+      "triple(X) :- price(X, P), P > 100, P < 1000"
+    ])
 
-    assert {:ok, {:bindings, [[binding]]}} = Conversation.query(conv, "why(discount(widget), Proof)")
+    assert {:ok, {:bindings, [[binding]]}} = Conversation.query(conv, "why(triple(widget), Proof)")
 
+    # A three-goal body is one flat list of three proofs — `,`/2 is right-associative,
+    # so the naive shape would nest the last two under the first instead.
     assert %{
              "functor" => "=",
              "args" => [
@@ -62,17 +67,15 @@ defmodule Manifold.Integration.WhyMetaInterpreterTest do
                %{
                  "functor" => "rule",
                  "args" => [
-                   %{"functor" => "discount", "args" => ["widget"]},
-                   %{
-                     "functor" => ",",
-                     "args" => [
-                       %{
-                         "functor" => "fact",
-                         "args" => [%{"functor" => "price", "args" => ["widget", 150]}]
-                       },
-                       %{"functor" => "builtin", "args" => [%{"functor" => ">", "args" => [150, 100]}]}
-                     ]
-                   }
+                   %{"functor" => "triple", "args" => ["widget"]},
+                   [
+                     %{
+                       "functor" => "fact",
+                       "args" => [%{"functor" => "price", "args" => ["widget", 150]}]
+                     },
+                     %{"functor" => "builtin", "args" => [%{"functor" => ">", "args" => [150, 100]}]},
+                     %{"functor" => "builtin", "args" => [%{"functor" => "<", "args" => [150, 1000]}]}
+                   ]
                  ]
                }
              ]
