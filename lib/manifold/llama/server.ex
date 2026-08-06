@@ -47,7 +47,11 @@ defmodule Manifold.Llama.Server do
         Integer.to_string(port),
         "--jinja",
         "--ctx-size",
-        "8192"
+        "8192",
+        # Lock model pages in RAM so they are never swapped back after the
+        # warm-up inference pages them in. Requires sufficient ulimit -l;
+        # remove if the process lacks the privilege.
+        "--mlock"
       ]
 
       case OsProcess.open("llama-server", args) do
@@ -76,11 +80,33 @@ defmodule Manifold.Llama.Server do
   def handle_info(:poll_ready, s) do
     if healthy?(s.host, s.http_port) do
       Logger.info("[llama] ready on http://#{s.host}:#{s.http_port}")
+      send(self(), :warmup)
       {:noreply, %{s | status: :ready}}
     else
       Process.send_after(self(), :poll_ready, 1_000)
       {:noreply, s}
     end
+  end
+
+  # Fire a minimal 1-token completion to page the model weights into RAM.
+  # The server is already :ready so real requests can proceed in parallel;
+  # this just ensures the first user turn does not eat the page-fault storm.
+  def handle_info(:warmup, s) do
+    Logger.info("[llama] warming up — paging model weights into memory")
+
+    Task.start(fn ->
+      prompt = "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n"
+
+      case Manifold.Llama.Client.completion(prompt, n_predict: 1, temperature: 0.0) do
+        {:ok, _} ->
+          Logger.info("[llama] warm — first-inference cost paid at startup")
+
+        {:error, reason} ->
+          Logger.warning("[llama] warmup failed (not fatal): #{inspect(reason)}")
+      end
+    end)
+
+    {:noreply, s}
   end
 
   # llama-server log lines arrive on the port; forward at debug.
