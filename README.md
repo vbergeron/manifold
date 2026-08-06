@@ -116,6 +116,18 @@ cd ui && mise exec -- npm run dev
 And the UI runs with no backend at all: `http://localhost:5173/?mock=1` drives it
 from a scripted fake event feed. See `ui/README.md`.
 
+### Shortcut: mise tasks
+
+The commands above are also wired up as `mise` tasks (`mise tasks` lists them):
+
+```sh
+mise run setup      # mix deps.get + npm install
+mise run ui:build   # one-shot UI build into priv/static
+mise run server     # iex -S mix — boots every service Manifold owns (alias: start)
+mise run ui:dev     # Vite dev server on :5173, for frontend work
+mise run dev        # backend (non-interactive) + ui:dev together, Ctrl-C stops both
+```
+
 ## Run the smoke tests
 
 `scripts/smoke.exs` boots the app and drives a doubled conversation against the
