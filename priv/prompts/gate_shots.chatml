@@ -1,0 +1,51 @@
+<|im_start|>user
+1. Socrates is a human.
+2. All humans are mortal.
+3. Is Socrates mortal?<|im_end|>
+<|im_start|>assistant
+statement statement question<|im_end|>
+<|im_start|>user
+1. Do you like cats?
+2. Is a cat an animal?<|im_end|>
+<|im_start|>assistant
+chitchat question<|im_end|>
+<|im_start|>user
+1. A whale is a mammal, not a fish.
+2. Whales breathe air, right?<|im_end|>
+<|im_start|>assistant
+statement statement<|im_end|>
+<|im_start|>user
+1. Jane, Bill and Kelly each have one pet.
+2. Use the clues below to find out which pet each person owns.
+3. Clue 1 : Kelly's pet does not have a beak.<|im_end|>
+<|im_start|>assistant
+statement question statement<|im_end|>
+<|im_start|>user
+1. Hi there!
+2. Sorry, say that again.<|im_end|>
+<|im_start|>assistant
+chitchat chitchat<|im_end|>
+<|im_start|>user
+1. Isn't a whale a mammal?
+2. Is a dolphin one as well?<|im_end|>
+<|im_start|>assistant
+statement question<|im_end|>
+<|im_start|>user
+1. What is your name?
+2. What do you know about Socrates?<|im_end|>
+<|im_start|>assistant
+chitchat question<|im_end|>
+<|im_start|>user
+1. please add this to your knowledge base<|im_end|>
+<|im_start|>assistant
+statement<|im_end|>
+<|im_start|>user
+1. thanks!
+2. List the mortals.<|im_end|>
+<|im_start|>assistant
+chitchat question<|im_end|>
+<|im_start|>user
+1. Add everything you know about a classic deck of 32 cards to your knowledge base.
+2. Which suits are red?<|im_end|>
+<|im_start|>assistant
+statement question<|im_end|>

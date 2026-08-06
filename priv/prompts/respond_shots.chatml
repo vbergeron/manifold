@@ -1,0 +1,125 @@
+<|im_start|>user
+Evidence:
+- learned: human(socrates).
+
+Message: Socrates is a human.<|im_end|>
+<|im_start|>assistant
+Got it — I've put Socrates down as human.<|im_end|>
+<|im_start|>user
+Evidence:
+- learned: mortal(X) :- human(X).
+
+Message: humans are mortal<|im_end|>
+<|im_start|>assistant
+Noted — from here on I'll take anyone who is human to be mortal.<|im_end|>
+<|im_start|>user
+Evidence:
+- learned: mammal(X) :- whale(X).
+- learned: :- whale(A), fish(A).
+
+Message: A whale is a mammal, but never a fish.<|im_end|>
+<|im_start|>assistant
+Stored — every whale now counts as a mammal for me, and I'll object if anything turns up as both a whale and a fish.<|im_end|>
+<|im_start|>user
+Evidence:
+- learned: suit(hearts).
+- learned: suit(diamonds).
+- learned: suit(clubs).
+- learned: suit(spades).
+
+Message: The suits are hearts, diamonds, clubs and spades.<|im_end|>
+<|im_start|>assistant
+Kept — those four are the suits I'll recognise.<|im_end|>
+<|im_start|>user
+Evidence:
+- query: mortal(socrates) => true
+
+Message: Is Socrates mortal?<|im_end|>
+<|im_start|>assistant
+Yes, he is.<|im_end|>
+<|im_start|>user
+Evidence:
+- query: mortal(zeus) => false
+
+Message: Is Zeus mortal?<|im_end|>
+<|im_start|>assistant
+No — nothing I hold makes Zeus mortal.<|im_end|>
+<|im_start|>user
+Evidence:
+- query: capital(france, X) => X = paris
+
+Message: What is the capital of France?<|im_end|>
+<|im_start|>assistant
+Paris.<|im_end|>
+<|im_start|>user
+Evidence:
+- query: human(X) => X = alice; X = bob; X = carol
+
+Message: Who is human?<|im_end|>
+<|im_start|>assistant
+Alice, Bob and Carol.<|im_end|>
+<|im_start|>user
+Evidence:
+- query: age(X, Y) => X = alice, Y = 30; X = bob, Y = 41
+
+Message: ? age(X, Y).<|im_end|>
+<|im_start|>assistant
+Alice is 30 and Bob is 41.<|im_end|>
+<|im_start|>user
+Evidence:
+- unanswered: capital(france, X) — no capital/2 is stored
+
+Message: What is the capital of France?<|im_end|>
+<|im_start|>assistant
+I don't know that yet — I have nothing about capitals at all. Tell me and I'll keep it.<|im_end|>
+<|im_start|>user
+Evidence:
+- unanswered: nothing stored bears on owner(rex, X)
+
+Message: Who owns Rex?<|im_end|>
+<|im_start|>assistant
+I couldn't find anything on that. Tell me who owns Rex and I'll hold on to it.<|im_end|>
+<|im_start|>user
+Evidence:
+- unanswered: nothing has been stated to the knowledge base yet
+
+Message: Who is the tallest?<|im_end|>
+<|im_start|>assistant
+Nothing's been put to me yet, so there's no one for me to compare. Start telling me and I'll keep track.<|im_end|>
+<|im_start|>user
+Evidence:
+- CONTRADICTION: :- whale(A), fish(A). is violated (A = willy), offending clause: fish(willy).
+
+Message: Willy is a fish.<|im_end|>
+<|im_start|>assistant
+That clashes with what I already hold: Willy is a whale, and nothing can be both a whale and a fish. Which of the two should I keep?<|im_end|>
+<|im_start|>user
+Evidence:
+- CONTRADICTION: :- flies(tweety). is violated
+
+Message: Tweety can fly.<|im_end|>
+<|im_start|>assistant
+I can't take that on: I'm already holding that Tweety cannot fly. Should I drop that and let him fly instead?<|im_end|>
+<|im_start|>user
+Evidence:
+- learned: dog(rex).
+- query: mortal(rex) => false
+- unanswered: owner(rex, X) — no owner/2 is stored
+
+Message: Rex is a dog. Is he mortal, and who owns him?<|im_end|>
+<|im_start|>assistant
+Rex is down as a dog now. Nothing I hold makes him mortal, and I've no record of an owner — tell me who and I'll add it.<|im_end|>
+<|im_start|>user
+Evidence:
+(nothing new — answer conversationally, and do not claim to know facts)
+
+Message: how are you today?<|im_end|>
+<|im_start|>assistant
+I'm well, thanks for asking — what can I help you with?<|im_end|>
+<|im_start|>user
+Evidence:
+(nothing new — answer conversationally, and do not claim to know facts)
+
+Message: please modelize a classic deck of 32 cards<|im_end|>
+<|im_start|>assistant
+I've nothing stored about cards, and I'd rather not invent it. Describe the deck to me — the suits and the ranks — and I'll hold on to it.<|im_end|>

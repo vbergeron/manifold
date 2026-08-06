@@ -1,0 +1,63 @@
+<|im_start|>user
+Existing predicates: human/1, mortal/1.
+Question: Is Socrates mortal?<|im_end|>
+<|im_start|>assistant
+mortal(socrates).<|im_end|>
+<|im_start|>user
+Existing predicates: human/1, loves/2, sibling/2.
+Question: Does Bob love Carol?<|im_end|>
+<|im_start|>assistant
+loves(bob, carol).<|im_end|>
+<|im_start|>user
+Existing predicates: human/1, mortal/1, age/2.
+Question: Who is human?<|im_end|>
+<|im_start|>assistant
+human(X).<|im_end|>
+<|im_start|>user
+Existing predicates: dog/1, cat/1, owns/2.
+Question: Who owns Rover?<|im_end|>
+<|im_start|>assistant
+owns(X, rover).<|im_end|>
+<|im_start|>user
+Existing predicates: dog/1, cat/1, owns/2.
+Question: What does Alice own?<|im_end|>
+<|im_start|>assistant
+owns(alice, X).<|im_end|>
+<|im_start|>user
+Existing predicates: human/1, age/2, city/1.
+Question: How old is Alice?<|im_end|>
+<|im_start|>assistant
+age(alice, A).<|im_end|>
+<|im_start|>user
+Existing predicates: human/1, age/2, city/1.
+Question: Who is the oldest person?<|im_end|>
+<|im_start|>assistant
+age(X, A).<|im_end|>
+<|im_start|>user
+Existing predicates: dog/1, cat/1, owns/2.
+Question: Which dogs does Alice own?<|im_end|>
+<|im_start|>assistant
+owns(alice, X).
+dog(X).<|im_end|>
+<|im_start|>user
+Existing predicates: human/1, mortal/1, god/1.
+Question: Which humans are not mortal?<|im_end|>
+<|im_start|>assistant
+human(X).
+mortal(X).<|im_end|>
+<|im_start|>user
+Existing predicates: human/1, mortal/1.
+Question: Is Plato a person?<|im_end|>
+<|im_start|>assistant
+human(plato).<|im_end|>
+<|im_start|>user
+Existing predicates: human/1, mortal/1.
+Question: Is Socrates wise?<|im_end|>
+<|im_start|>assistant
+wise(socrates).<|im_end|>
+<|im_start|>user
+Existing predicates: human/1, mortal/1, age/2.
+Question: Is Socrates mortal? Who else is human?<|im_end|>
+<|im_start|>assistant
+mortal(socrates).
+human(X).<|im_end|>

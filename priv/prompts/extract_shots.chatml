@@ -1,0 +1,69 @@
+<|im_start|>user
+Existing predicates: none yet.
+Statement: Socrates is human. Alice is 30 years old.<|im_end|>
+<|im_start|>assistant
+human(socrates).
+age(alice, 30).<|im_end|>
+<|im_start|>user
+Existing predicates: none yet.
+Statement: Bob loves Carol. Alice and Bob are siblings.<|im_end|>
+<|im_start|>assistant
+loves(bob, carol).
+sibling(alice, bob).
+sibling(bob, alice).<|im_end|>
+<|im_start|>user
+Existing predicates: none yet.
+Statement: The compass directions are north, south, east and west.<|im_end|>
+<|im_start|>assistant
+direction(north).
+direction(south).
+direction(east).
+direction(west).<|im_end|>
+<|im_start|>user
+Existing predicates: human/1.
+Statement: All humans are mortal. An ancestor is a parent, or a parent of an ancestor.<|im_end|>
+<|im_start|>assistant
+mortal(X) :- human(X).
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).<|im_end|>
+<|im_start|>user
+Existing predicates: suit/1, rank/1.
+Statement: A card consists of a suit and a rank.<|im_end|>
+<|im_start|>assistant
+card(S, R) :- suit(S), rank(R).<|im_end|>
+<|im_start|>user
+Existing predicates: mammal/1.
+Statement: A whale is a mammal, but not a fish.<|im_end|>
+<|im_start|>assistant
+mammal(X) :- whale(X).
+:- whale(A), fish(A).<|im_end|>
+<|im_start|>user
+Existing predicates: human/1, mortal/1.
+Statement: Plato is a person.<|im_end|>
+<|im_start|>assistant
+human(plato).<|im_end|>
+<|im_start|>user
+Existing predicates: none yet.
+Statement: A -> B (4)
+A -> C (2)
+B -> C (1)
+B -> D (5)
+C -> D (8)<|im_end|>
+<|im_start|>assistant
+edge(a, b, 4).
+edge(a, c, 2).
+edge(b, c, 1).
+edge(b, d, 5).
+edge(c, d, 8).<|im_end|>
+<|im_start|>user
+Existing predicates: edge/3.
+Statement: A -> D (3)
+D -> E (7)
+E -> F (2)
+There is a path between two nodes if there is a direct edge, or if there is a chain of edges connecting them.<|im_end|>
+<|im_start|>assistant
+edge(a, d, 3).
+edge(d, e, 7).
+edge(e, f, 2).
+path(X, Y) :- edge(X, Y, _).
+path(X, Z) :- edge(X, Y, _), path(Y, Z).<|im_end|>
