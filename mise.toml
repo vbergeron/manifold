@@ -20,3 +20,43 @@ MANIFOLD_LLAMA_PORT = "8080"
 [settings]
 # asdf-style plugins (swiprolog) need this.
 idiomatic_version_file_enable_tools = ["elixir", "erlang"]
+
+[tasks.setup]
+description = "Install Elixir deps and UI npm packages"
+run = """
+set -euo pipefail
+mix deps.get
+(cd ui && npm install)
+"""
+
+[tasks."ui:build"]
+description = "Build the UI once into ../priv/static (served by the backend on :4000)"
+run = "cd ui && npm run build"
+
+[tasks.server]
+alias = "start"
+description = """
+Boot the backend. One OS process (via iex -S mix) starts every service Manifold \
+owns: the shared Llama.Server sidecar, the per-conversation swipl engines, and \
+the Bandit endpoint on :4000. Needs `ui:build` first, or `/` replies 503.
+"""
+run = "iex -S mix"
+
+[tasks."ui:dev"]
+description = "Vite dev server for the UI with hot reload, on :5173, talking to the backend on :4000"
+run = "cd ui && npm run dev"
+
+[tasks.dev]
+description = """
+Start every service needed for full-stack local development: the backend \
+(Llama sidecar + Bandit on :4000, non-interactively) and the UI dev server \
+(:5173) together. Ctrl-C stops both.
+"""
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+trap 'kill 0' EXIT
+mix run --no-halt &
+(cd ui && npm run dev) &
+wait
+"""
