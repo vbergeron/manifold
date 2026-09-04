@@ -264,6 +264,15 @@ Recently added:
   re-asserting them by hand or re-teaching them to the model in every conversation.
   Unset by default. A prelude that fails to load (missing file, a directive that
   errors) fails that conversation's startup rather than silently running without it.
+
+Decided, not yet implemented:
+
+- **External-model degrade strategy.** GBNF-constrained decoding is a local-only
+  guarantee — no hosted API exposes arbitrary GBNF. `docs/adr/0001-external-model-decoding-strategy.md`
+  settles what each of the three grammar-constrained call sites (`Gate.label/1`,
+  `Turn.extract/4`, `Turn.query/4`) does on an external backend, and how the guarantee's
+  scope gets qualified in this README and in `Manifold.Clause`'s moduledoc once that
+  backend lands.
   It is infrastructure, not a conversation input: it never appears in `kb_snapshot`
   and is not written to the conversation's log. `priv/prelude.pl` ships one example:
   the textbook "why" meta-interpreter (Sterling & Shapiro, *The Art of Prolog*) —
