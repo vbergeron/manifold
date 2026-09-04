@@ -7,7 +7,9 @@ defmodule Manifold do
 
     * `Manifold.Llama.Server` — **one shared** `llama.cpp` HTTP server, supervised as an
       OS process. GBNF-constrained decoding (`Manifold.Grammar.prolog/0`) forces the
-      model to emit valid Prolog. Talk to it via `Manifold.Llama.Client`.
+      model to emit valid Prolog. Talk to it via `Manifold.Llama.Client`, the default
+      `Manifold.Model` backend — the seam the turn loop generates through, so another
+      backend can be selected without `Manifold.Turn` or `Manifold.Gate` changing.
     * `Manifold.Prolog.Engine` — **one per conversation**, owned by the
       `Manifold.Conversation` process itself rather than supervised centrally. MQI
       connections into a single swipl share a global clause store, so a shared server

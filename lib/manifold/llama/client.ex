@@ -7,7 +7,11 @@ defmodule Manifold.Llama.Client do
   *constrain decoding*. Passing `Manifold.Grammar.prolog/0` makes the model
   physically unable to emit anything but syntactically valid Prolog — the
   guarantee Ollama's JSON-schema-only API could not give us.
+
+  Implements `Manifold.Model` — the default backend, selected there unless
+  `config :manifold, :model` names another one.
   """
+  @behaviour Manifold.Model
 
   @receive_timeout 120_000
 
@@ -20,6 +24,7 @@ defmodule Manifold.Llama.Client do
 
   Returns `{:ok, text}` or `{:error, reason}`.
   """
+  @impl Manifold.Model
   @spec completion(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def completion(prompt, opts \\ []) do
     case Req.post(url(), json: body(prompt, opts), receive_timeout: @receive_timeout, retry: false) do
@@ -43,6 +48,7 @@ defmodule Manifold.Llama.Client do
   calls this, so its death closes the connection and llama.cpp stops generating.
   That is exactly what `cancel_turn` does.
   """
+  @impl Manifold.Model
   @spec stream(String.t(), keyword(), (String.t() -> any())) :: {:ok, String.t()} | {:error, term()}
   def stream(prompt, opts, on_delta) when is_function(on_delta, 1) do
     body = Map.put(body(prompt, opts), :stream, true)

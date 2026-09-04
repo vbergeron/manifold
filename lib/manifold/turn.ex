@@ -38,8 +38,7 @@ defmodule Manifold.Turn do
   """
   require Logger
 
-  alias Manifold.{Clause, Conversation, Event, Gate, Grammar, Prompt}
-  alias Manifold.Llama.Client
+  alias Manifold.{Clause, Conversation, Event, Gate, Grammar, Model, Prompt}
   alias Manifold.Prolog.{Answer, AuditTree}
 
   @extract_opts [n_predict: 200, temperature: 0.2]
@@ -277,7 +276,7 @@ defmodule Manifold.Turn do
     end
 
     reply =
-      case Client.stream(prompt, @respond_opts, emit) do
+      case Model.stream(prompt, @respond_opts, emit) do
         {:ok, streamed} ->
           String.trim(streamed)
 
@@ -317,7 +316,7 @@ defmodule Manifold.Turn do
   end
 
   defp generate(prompt, opts, turn, subscriber) do
-    case Client.completion(prompt, Keyword.put(opts, :grammar, Grammar.prolog())) do
+    case Model.completion(prompt, Keyword.put(opts, :grammar, Grammar.prolog())) do
       {:ok, output} ->
         {:ok, output}
 

@@ -3,6 +3,10 @@ import Config
 # Defaults; overridden at boot by config/runtime.exs from MANIFOLD_* env vars
 # (which mise.toml sets under [env]).
 config :manifold,
+  # The `Manifold.Model` backend the turn loop generates through. Swapping this is the
+  # entire integration point for another backend (see the external-models issues); nothing
+  # else should need to change to add one, only to select it.
+  model: Manifold.Llama.Client,
   llama_host: "127.0.0.1",
   llama_port: 8080,
   # No prolog host/port: each conversation launches its own swipl and MQI assigns it a
