@@ -23,10 +23,7 @@ defmodule Manifold.Llama.Server do
   @impl true
   def init(_opts) do
     Process.flag(:trap_exit, true)
-    cfg = Application.get_all_env(:manifold)
-    host = cfg[:llama_host]
-    port = cfg[:llama_port]
-    model = cfg[:model_path]
+    {host, port, model} = llama_config()
 
     state = %{
       status: :init,
@@ -37,7 +34,7 @@ defmodule Manifold.Llama.Server do
       model: model
     }
 
-    if File.exists?(model) do
+    if model && File.exists?(model) do
       args = [
         "--model",
         model,
@@ -64,10 +61,7 @@ defmodule Manifold.Llama.Server do
           {:stop, reason}
       end
     else
-      Logger.warning(
-        "[llama] no model at #{model} — server NOT started. Put a .gguf there (or set MANIFOLD_MODEL) and restart."
-      )
-
+      Logger.warning(no_model_message(model))
       {:ok, %{state | status: :no_model}}
     end
   end
@@ -135,5 +129,31 @@ defmodule Manifold.Llama.Server do
     end
   rescue
     _ -> false
+  end
+
+  # This sidecar exists to serve `Manifold.Llama.Client`, so its own config lives under
+  # `Manifold.Model.opts/0` when that is the configured backend — same provider-aware
+  # `:model` config every other reader of these opts uses (see `Manifold.Model`). When a
+  # different backend is configured there is no GGUF to serve; this parks in `:no_model`
+  # exactly as it would for a missing file, rather than guessing at a host/port that
+  # belong to a provider this server has no part in.
+  defp llama_config do
+    case Manifold.Model.impl() do
+      Manifold.Llama.Client ->
+        opts = Manifold.Model.opts()
+        {Keyword.get(opts, :llama_host, "127.0.0.1"), Keyword.get(opts, :llama_port, 8080), opts[:model_path]}
+
+      _other ->
+        {"127.0.0.1", 8080, nil}
+    end
+  end
+
+  defp no_model_message(nil) do
+    "[llama] no local model configured — server NOT started. Set MANIFOLD_MODEL_PROVIDER=llama " <>
+      "and MANIFOLD_MODEL, or drop a .gguf at the configured model_path, and restart."
+  end
+
+  defp no_model_message(model) do
+    "[llama] no model at #{model} — server NOT started. Put a .gguf there (or set MANIFOLD_MODEL) and restart."
   end
 end

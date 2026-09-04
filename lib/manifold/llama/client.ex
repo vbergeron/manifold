@@ -9,7 +9,9 @@ defmodule Manifold.Llama.Client do
   guarantee Ollama's JSON-schema-only API could not give us.
 
   Implements `Manifold.Model` — the default backend, selected there unless
-  `config :manifold, :model` names another one.
+  `config :manifold, :model` names another one. Its own opts (`model_path`,
+  `llama_host`, `llama_port`) travel alongside it in that same `{module, opts}` tuple —
+  see `Manifold.Model`'s moduledoc.
   """
   @behaviour Manifold.Model
 

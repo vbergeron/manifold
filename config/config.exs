@@ -3,16 +3,23 @@ import Config
 # Defaults; overridden at boot by config/runtime.exs from MANIFOLD_* env vars
 # (which mise.toml sets under [env]).
 config :manifold,
-  # The `Manifold.Model` backend the turn loop generates through. Swapping this is the
-  # entire integration point for another backend (see the external-models issues); nothing
-  # else should need to change to add one, only to select it.
-  model: Manifold.Llama.Client,
-  llama_host: "127.0.0.1",
-  llama_port: 8080,
-  # No prolog host/port: each conversation launches its own swipl and MQI assigns it a
-  # free loopback port, which it reports on stdout. A fixed port could not work for N
-  # engines, so there is deliberately nothing to configure.
-  model_path: Path.expand("models/model.gguf", File.cwd!()),
+  # The `Manifold.Model` backend the turn loop generates through, as `{module, opts}` —
+  # opts are backend-specific, which is the whole point: a local GGUF needs a filesystem
+  # path and a sidecar host/port, an external provider needs an API key and a model name,
+  # and neither shape leaks into the other. Swapping the module is the entire integration
+  # point for another backend (see the external-models issues); nothing else should need
+  # to change to add one, only to select it and give it its own opts. Local hosting is one
+  # branch among equals here, not an implicit default with external bolted on — see
+  # `config/runtime.exs` for how `MANIFOLD_MODEL_PROVIDER` picks between them.
+  model: {
+    Manifold.Llama.Client,
+    # No prolog host/port: each conversation launches its own swipl and MQI assigns it a
+    # free loopback port, which it reports on stdout. A fixed port could not work for N
+    # engines, so there is deliberately nothing to configure.
+    model_path: Path.expand("models/model.gguf", File.cwd!()),
+    llama_host: "127.0.0.1",
+    llama_port: 8080
+  },
   # Bandit endpoint: HTTP + the /socket WebSocket upgrade the UI connects to.
   web_port: 4000,
   # Live conversations, each holding one swipl (~5.3 MB PSS, ~90 ms to boot). Nothing
