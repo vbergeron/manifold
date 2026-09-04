@@ -31,8 +31,7 @@ defmodule Manifold.Gate do
   """
   require Logger
 
-  alias Manifold.{Grammar, Prompt}
-  alias Manifold.Llama.Client
+  alias Manifold.{Grammar, Model, Prompt}
 
   # --- the lexical fallback's word lists -------------------------------------
   #
@@ -123,7 +122,7 @@ defmodule Manifold.Gate do
   defp label(sentences) do
     opts = [n_predict: @label_tokens, temperature: 0.0, grammar: Grammar.gate()]
 
-    with {:ok, output} <- Client.completion(Prompt.gate(sentences), opts),
+    with {:ok, output} <- Model.completion(Prompt.gate(sentences), opts),
          labels = String.split(output, ~r/\s+/, trim: true),
          true <- length(labels) == length(sentences) do
       {:ok, labels}

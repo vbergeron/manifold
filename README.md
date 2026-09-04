@@ -56,7 +56,8 @@ including `:kill` — the port closes and the sh guardian reaps swipl, with no r
 | `Manifold.Application`  | Supervision tree (the model sidecar, conversations, and the endpoint). |
 | `Manifold.OsProcess`    | Owns an OS process via a `Port`; a sh guardian kills the child when the owning process dies or on SIGTERM, so nothing is ever orphaned. |
 | `Manifold.Llama.Server` | Supervised `llama-server`; polls `/health`; parks in `:no_model` if no GGUF is present. |
-| `Manifold.Llama.Client` | HTTP client; `:grammar` option sends a **GBNF** string for constrained decoding; `stream/3` for token-by-token. |
+| `Manifold.Model`        | The backend seam: a behaviour (`completion/2`, `stream/3`) that `Manifold.Turn` and `Manifold.Gate` call through, resolved from `config :manifold, :model`. Swapping the configured module is the whole integration point for a non-local backend. |
+| `Manifold.Llama.Client` | The default `Manifold.Model` backend, talking HTTP to `llama.cpp`; `:grammar` option sends a **GBNF** string for constrained decoding; `stream/3` for token-by-token. |
 | `Manifold.Prolog.Engine`| One `swipl` MQI server per conversation, owned by it. MQI picks the port and password and reports them on stdout. |
 | `Manifold.Prolog.MQI`   | MQI wire protocol (length-prefixed frames, JSON answers); separates transport failure from a Prolog exception. |
 | `Manifold.Prolog.Answer`| Decodes MQI answers into `true` / `false` / bindings, and picks a witness. |
