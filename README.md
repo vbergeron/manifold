@@ -56,8 +56,8 @@ including `:kill` — the port closes and the sh guardian reaps swipl, with no r
 | `Manifold.Application`  | Supervision tree (the model sidecar, conversations, and the endpoint). |
 | `Manifold.OsProcess`    | Owns an OS process via a `Port`; a sh guardian kills the child when the owning process dies or on SIGTERM, so nothing is ever orphaned. |
 | `Manifold.Llama.Server` | Supervised `llama-server`; polls `/health`; parks in `:no_model` if no GGUF is present. |
-| `Manifold.Model`        | The backend seam: a behaviour (`completion/2`, `stream/3`) that `Manifold.Turn` and `Manifold.Gate` call through, resolved from `config :manifold, :model`. Swapping the configured module is the whole integration point for a non-local backend. |
-| `Manifold.Llama.Client` | The default `Manifold.Model` backend, talking HTTP to `llama.cpp`; `:grammar` option sends a **GBNF** string for constrained decoding; `stream/3` for token-by-token. |
+| `Manifold.Model`        | The backend seam: a behaviour (`completion/2`, `stream/3`) that `Manifold.Turn` and `Manifold.Gate` call through, resolved from `config :manifold, model: {module, opts}`. Swapping the configured module (and giving it its own opts) is the whole integration point for a non-local backend — see "Provider config" below. |
+| `Manifold.Llama.Client` | The default `Manifold.Model` backend, talking HTTP to `llama.cpp`; `:grammar` option sends a **GBNF** string for constrained decoding; `stream/3` for token-by-token. Its opts are `model_path`/`llama_host`/`llama_port`. |
 | `Manifold.Prolog.Engine`| One `swipl` MQI server per conversation, owned by it. MQI picks the port and password and reports them on stdout. |
 | `Manifold.Prolog.MQI`   | MQI wire protocol (length-prefixed frames, JSON answers); separates transport failure from a Prolog exception. |
 | `Manifold.Prolog.Answer`| Decodes MQI answers into `true` / `false` / bindings, and picks a witness. |
@@ -91,6 +91,25 @@ mise exec -- mix compile
 The LLM server needs a GGUF model. Drop one at `models/model.gguf` (or point
 `MANIFOLD_MODEL` at it). Without a model the app still boots — the Prolog half
 is fully functional; the llama server just parks in `:no_model`.
+
+### Provider config
+
+`config :manifold, :model` is `{module, opts}` — a `Manifold.Model` implementation plus
+its own backend-specific config (`config/config.exs`). `config/runtime.exs` builds that
+tuple from the environment, gated on `MANIFOLD_MODEL_PROVIDER`:
+
+| `MANIFOLD_MODEL_PROVIDER` | Backend | Relevant env vars |
+|---|---|---|
+| `llama` (default) | `Manifold.Llama.Client`, local `llama.cpp` | `MANIFOLD_MODEL` (GGUF path — unchanged meaning), `MANIFOLD_LLAMA_HOST`, `MANIFOLD_LLAMA_PORT` |
+| anything else | *(none shipped yet)* | `MANIFOLD_API_KEY`, `MANIFOLD_MODEL_NAME` — wired ahead of a backend landing to receive them |
+
+Local hosting is not the implicit default with external bolted on: both branches go
+through the same `known_providers` lookup in `runtime.exs`, and `llama` is simply the
+only entry with an implementation today. Selecting an unrecognized provider is a
+boot-time error, not a silent fall-back — an operator who set `MANIFOLD_API_KEY`
+expecting it to be used needs to find out immediately if it wasn't. See
+`docs/adr/0001-external-model-decoding-strategy.md` for what an external backend still
+needs before it can be added to that map.
 
 ## Run it
 
@@ -264,6 +283,11 @@ Recently added:
   re-asserting them by hand or re-teaching them to the model in every conversation.
   Unset by default. A prelude that fails to load (missing file, a directive that
   errors) fails that conversation's startup rather than silently running without it.
+- **Provider-aware model config.** `config :manifold, :model` is `{module, opts}`
+  instead of a bare module, and `MANIFOLD_MODEL_PROVIDER` selects which backend
+  `config/runtime.exs` builds — see "Provider config" above. `MANIFOLD_MODEL` keeps its
+  existing meaning (a GGUF path) for the local branch; `MANIFOLD_API_KEY` and
+  `MANIFOLD_MODEL_NAME` are wired for an external one to read once it exists.
 
 Decided, not yet implemented:
 

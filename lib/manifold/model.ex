@@ -10,7 +10,14 @@ defmodule Manifold.Model do
 
   A backend implements the behaviour below and is selected with
 
-      config :manifold, model: Manifold.Llama.Client
+      config :manifold, model: {Manifold.Llama.Client, model_path: "...", llama_host: "...", llama_port: 8080}
+
+  i.e. `{module, opts}` — `opts` is backend-specific and opaque to this module on
+  purpose: a local GGUF backend needs a filesystem path and a sidecar host/port, an
+  external provider needs an API key and a model name, and this seam never grows an
+  opinion about either shape. See `config/config.exs` and `config/runtime.exs` (the
+  latter is where `MANIFOLD_MODEL_PROVIDER` picks the module and each provider's own
+  env vars fill in its opts).
 
   `Manifold.Llama.Client` remains the default and, for now, the only
   implementation. Swapping it for another module is the entire integration
@@ -39,7 +46,28 @@ defmodule Manifold.Model do
 
   @doc "The configured backend module. Defaults to `Manifold.Llama.Client`."
   @spec impl() :: module()
-  def impl, do: Application.get_env(:manifold, :model, Manifold.Llama.Client)
+  def impl, do: config() |> elem(0)
+
+  @doc """
+  The configured backend's own opts — the `model_path`/`llama_host`/`llama_port` a local
+  backend needs, the `api_key`/`model` an external one needs, whatever the next one
+  needs. Only the backend named by `impl/0` is expected to know what these mean;
+  `Manifold.Llama.Server` is the one other reader in this codebase, and only because it
+  is `Manifold.Llama.Client`'s sidecar.
+  """
+  @spec opts() :: keyword()
+  def opts, do: config() |> elem(1)
+
+  # `Application.get_env(:manifold, :model)` is documented and configured as `{module,
+  # opts}`, but a bare module atom is accepted too — the shape `test/manifold/model_test.exs`
+  # and any ad-hoc `Application.put_env(:manifold, :model, Fake)` reach for when a test
+  # cares about the backend and not its opts.
+  defp config do
+    case Application.get_env(:manifold, :model, Manifold.Llama.Client) do
+      {module, opts} when is_atom(module) and is_list(opts) -> {module, opts}
+      module when is_atom(module) -> {module, []}
+    end
+  end
 
   @doc "Delegates to the configured backend's `completion/2`."
   @spec completion(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
