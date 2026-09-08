@@ -26,8 +26,16 @@ config :manifold,
   # `endpoint/0` still answers, so `Manifold.Llama.Client` returns a real `{:error, _}`
   # instead of exiting `:noproc` — which is what lets the no-model fallback path be tested
   # at all. Nested under `:model` because `model_path` is `Manifold.Llama.Client`-specific
-  # opts, not a codebase-wide setting — see `config/config.exs`.
-  model: {Manifold.Llama.Client, model_path: "/nonexistent/manifold-test-no-model.gguf"},
+  # opts, not a codebase-wide setting — see `config/config.exs`. `llama_host`/`llama_port`
+  # are carried too, matching `config/config.exs`'s shape exactly: `Llama.Server` never gets
+  # far enough to dial them (parking on the missing `model_path` happens first), so they
+  # cost nothing and keep the two configs' opts the same shape.
+  model: {
+    Manifold.Llama.Client,
+    model_path: "/nonexistent/manifold-test-no-model.gguf",
+    llama_host: "127.0.0.1",
+    llama_port: 8080
+  },
 
   # Long enough that idle eviction never fires by accident. Tests that want eviction set
   # it themselves with `Application.put_env` and restore it in `on_exit`.
