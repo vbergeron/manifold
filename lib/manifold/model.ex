@@ -19,10 +19,14 @@ defmodule Manifold.Model do
   latter is where `MANIFOLD_MODEL_PROVIDER` picks the module and each provider's own
   env vars fill in its opts).
 
-  `Manifold.Llama.Client` remains the default and, for now, the only
-  implementation. Swapping it for another module is the entire integration
-  surface: nothing else in this module should ever grow provider-specific
-  logic — that belongs in the implementation, not the seam.
+  `Manifold.Llama.Client` remains the default. `Manifold.Anthropic.Client` is
+  the first external implementation — it exists and can be named directly in
+  `config :manifold, :model`, but wiring it into `MANIFOLD_MODEL_PROVIDER`
+  (`config/runtime.exs`'s `known_providers`) is config plumbing left to a
+  follow-up, deliberately out of scope for landing the client itself. Swapping
+  the configured module is the entire integration surface: nothing else in
+  this module should ever grow provider-specific logic — that belongs in the
+  implementation, not the seam.
   """
 
   @doc """

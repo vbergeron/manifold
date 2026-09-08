@@ -58,6 +58,7 @@ including `:kill` — the port closes and the sh guardian reaps swipl, with no r
 | `Manifold.Llama.Server` | Supervised `llama-server`; polls `/health`; parks in `:no_model` if no GGUF is present. |
 | `Manifold.Model`        | The backend seam: a behaviour (`completion/2`, `stream/3`) that `Manifold.Turn` and `Manifold.Gate` call through, resolved from `config :manifold, model: {module, opts}`. Swapping the configured module (and giving it its own opts) is the whole integration point for a non-local backend — see "Provider config" below. |
 | `Manifold.Llama.Client` | The default `Manifold.Model` backend, talking HTTP to `llama.cpp`; `:grammar` option sends a **GBNF** string for constrained decoding; `stream/3` for token-by-token. Its opts are `model_path`/`llama_host`/`llama_port`. |
+| `Manifold.Anthropic.Client` | The first external `Manifold.Model` backend, talking to Anthropic's Messages API. Auth is a header, never a query param; its own SSE parser handles the provider's per-event `type` field. Ignores `:grammar` — no GBNF guarantee, see `docs/adr/0001-external-model-decoding-strategy.md`. Its config is `api_key`/`model` (required), `base_url`/`receive_timeout` (optional). Not yet reachable via `MANIFOLD_MODEL_PROVIDER` — see "Provider config" below. |
 | `Manifold.Prolog.Engine`| One `swipl` MQI server per conversation, owned by it. MQI picks the port and password and reports them on stdout. |
 | `Manifold.Prolog.MQI`   | MQI wire protocol (length-prefixed frames, JSON answers); separates transport failure from a Prolog exception. |
 | `Manifold.Prolog.Answer`| Decodes MQI answers into `true` / `false` / bindings, and picks a witness. |
@@ -101,7 +102,7 @@ tuple from the environment, gated on `MANIFOLD_MODEL_PROVIDER`:
 | `MANIFOLD_MODEL_PROVIDER` | Backend | Relevant env vars |
 |---|---|---|
 | `llama` (default) | `Manifold.Llama.Client`, local `llama.cpp` | `MANIFOLD_MODEL` (GGUF path — unchanged meaning), `MANIFOLD_LLAMA_HOST`, `MANIFOLD_LLAMA_PORT` |
-| anything else | *(none shipped yet)* | `MANIFOLD_API_KEY`, `MANIFOLD_MODEL_NAME` — wired ahead of a backend landing to receive them |
+| anything else | *(not wired into `known_providers` yet — `Manifold.Anthropic.Client` exists and can be named directly in `config :manifold, :model`, but selecting it via this env var is a config-plumbing follow-up)* | `MANIFOLD_API_KEY`, `MANIFOLD_MODEL_NAME` — wired ahead of a backend landing to receive them |
 
 Local hosting is not the implicit default with external bolted on: both branches go
 through the same `known_providers` lookup in `runtime.exs`, and `llama` is simply the
